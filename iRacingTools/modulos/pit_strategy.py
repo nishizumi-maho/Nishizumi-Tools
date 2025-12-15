@@ -134,23 +134,27 @@ class PitStrategyManager:
             # Toggle commands
             "cmd_when_on": "#-cleartires #ws",
             "cmd_when_off": "#cleartires #-ws",
+            "enable_pygame": False,
         }
 
         self.load_config()
 
-        # Init joystick (optional)
         self._joysticks = []
-        if pygame is not None:
-            try:
-                pygame.init()
-                pygame.joystick.init()
-                self._joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
-                for j in self._joysticks:
-                    j.init()
-            except Exception:
-                self._joysticks = []
 
         self._hotkey_handle = None
+
+    def _init_joysticks(self) -> None:
+        if pygame is None:
+            return
+
+        try:
+            pygame.init()
+            pygame.joystick.init()
+            self._joysticks = [pygame.joystick.Joystick(i) for i in range(pygame.joystick.get_count())]
+            for joystick in self._joysticks:
+                joystick.init()
+        except Exception:
+            self._joysticks = []
 
     # ---------- config ----------
 
@@ -166,6 +170,9 @@ class PitStrategyManager:
                 self.config.update(data)
         except Exception:
             pass
+
+        if "enable_pygame" not in self.config:
+            self.config["enable_pygame"] = False
 
     def save_config(self) -> None:
         _ensure_dirs()
@@ -267,8 +274,10 @@ class PitStrategyManager:
             except Exception:
                 self._hotkey_handle = None
 
-        # Joystick loop
-        threading.Thread(target=self._joystick_loop, daemon=True).start()
+        # Joystick loop (opt-in)
+        if bool(self.config.get("enable_pygame", False)) and bind.startswith("JOY:"):
+            self._init_joysticks()
+            threading.Thread(target=self._joystick_loop, daemon=True).start()
 
     def stop_listener(self) -> None:
         self.running = False
@@ -279,10 +288,12 @@ class PitStrategyManager:
         self._hotkey_handle = None
 
     def _joystick_loop(self) -> None:
-        if pygame is None:
+        if pygame is None or not bool(self.config.get("enable_pygame", False)):
             return
 
         while self.running:
+            if not bool(self.config.get("enable_pygame", False)):
+                break
             bind = str(self.config.get("bind_code", ""))
             if bind.startswith("JOY:"):
                 target = bind
@@ -301,7 +312,7 @@ class PitStrategyManager:
 # ==========================
 
 
-def capture_input_scan(timeout_s: float = 5.0) -> Optional[str]:
+def capture_input_scan(timeout_s: float = 5.0, allow_joystick: bool = True) -> Optional[str]:
     """Capture a KEY:<name> or JOY:<joy>:<button> for binding."""
 
     found: Optional[str] = None
@@ -318,7 +329,7 @@ def capture_input_scan(timeout_s: float = 5.0) -> Optional[str]:
     start = time.time()
 
     # Ensure pygame initialized for joystick capture
-    if pygame is not None:
+    if allow_joystick and pygame is not None:
         try:
             pygame.init()
             pygame.joystick.init()
@@ -329,7 +340,7 @@ def capture_input_scan(timeout_s: float = 5.0) -> Optional[str]:
         while time.time() - start < timeout_s:
             if found:
                 break
-            if pygame is not None:
+            if allow_joystick and pygame is not None:
                 try:
                     for event in pygame.event.get():
                         if event.type == pygame.JOYBUTTONDOWN:
