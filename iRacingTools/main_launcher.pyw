@@ -1,7 +1,6 @@
 import customtkinter as ctk
 import os
 import sys
-import threading
 import subprocess
 import tkinter.messagebox
 from tkinter import messagebox
@@ -63,17 +62,9 @@ class LauncherApp(ctk.CTk):
         self.chk_windows.pack(pady=5)
         if self.check_registry_status(): self.chk_windows.select()
 
-        # 1. Active Telemetry (ARB)
-        self.frame_arb = ctk.CTkFrame(self, border_width=2, border_color="#1f538d")
-        self.frame_arb.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
-        f_arb_txt = ctk.CTkFrame(self.frame_arb, fg_color="transparent")
-        f_arb_txt.pack(side="left", padx=20, pady=15)
-        ctk.CTkLabel(f_arb_txt, text="Active Telemetry Controller", font=("Arial", 16, "bold"), anchor="w").pack(fill="x")
-        ctk.CTkButton(self.frame_arb, text="ABRIR PAINEL", command=self.launch_arb, width=120).pack(side="right", padx=20)
-
-        # 2. Race Engineer
+        # 1. Race Engineer
         self.frame_eng = ctk.CTkFrame(self)
-        self.frame_eng.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+        self.frame_eng.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
         ctk.CTkLabel(self.frame_eng, text="🔊 Race Engineer", font=("Arial", 15, "bold")).pack(side="left", padx=20, pady=15)
         
         self.lbl_eng_state = ctk.CTkLabel(self.frame_eng, text="[PARADO]", font=("Arial", 11, "bold"), text_color="gray")
@@ -86,9 +77,9 @@ class LauncherApp(ctk.CTk):
         self.sw_eng = ctk.CTkSwitch(f_eng_ctrl, text="", command=self.toggle_engineer, onvalue="LIGADO", offvalue="DESLIGADO", width=40)
         self.sw_eng.pack(side="left", padx=5)
 
-        # 3. Smart Flasher
+        # 2. Smart Flasher
         self.frame_flash = ctk.CTkFrame(self)
-        self.frame_flash.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
+        self.frame_flash.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
         ctk.CTkLabel(self.frame_flash, text="💡 Smart Flasher", font=("Arial", 15, "bold")).pack(side="left", padx=20, pady=15)
         
         self.lbl_flash_state = ctk.CTkLabel(self.frame_flash, text="[PARADO]", font=("Arial", 11, "bold"), text_color="gray")
@@ -102,9 +93,9 @@ class LauncherApp(ctk.CTk):
         self.sw_flash = ctk.CTkSwitch(f_flash_ctrl, text="", command=self.toggle_flasher, onvalue="LIGADO", offvalue="DESLIGADO", width=40)
         self.sw_flash.pack(side="left", padx=5)
 
-        # 4. Turbo Pit
+        # 3. Turbo Pit
         self.frame_pit = ctk.CTkFrame(self)
-        self.frame_pit.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        self.frame_pit.grid(row=3, column=0, padx=20, pady=5, sticky="ew")
         ctk.CTkLabel(self.frame_pit, text="🔧 Turbo Pit", font=("Arial", 15, "bold")).pack(side="left", padx=20, pady=15)
         
         self.lbl_pit_state = ctk.CTkLabel(self.frame_pit, text="[PARADO]", font=("Arial", 11, "bold"), text_color="gray")
@@ -116,6 +107,12 @@ class LauncherApp(ctk.CTk):
         
         self.sw_pit = ctk.CTkSwitch(f_pit_ctrl, text="", command=self.toggle_pit, onvalue="LIGADO", offvalue="DESLIGADO", width=40)
         self.sw_pit.pack(side="left", padx=5)
+
+        # 4. Fuel Overlay
+        self.frame_overlay = ctk.CTkFrame(self)
+        self.frame_overlay.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        ctk.CTkLabel(self.frame_overlay, text="📊 Fuel Overlay", font=("Arial", 15, "bold")).pack(side="left", padx=20, pady=15)
+        ctk.CTkButton(self.frame_overlay, text="ABRIR", width=100, command=self.launch_overlay).pack(side="right", padx=20)
 
         # Footer
         self.lbl_status = ctk.CTkLabel(self, text="Pronto.", text_color="gray")
@@ -228,8 +225,8 @@ class LauncherApp(ctk.CTk):
     def open_pit_config(self): PitConfigWindow(self, self.pit_module)
     def open_flash_config(self): FlasherConfigWindow(self, self.flash_module)
 
-    def launch_arb(self):
-        script_path = os.path.join(ROOT_DIR, "modulos", "arb_control.py")
+    def launch_overlay(self):
+        script_path = os.path.join(ROOT_DIR, "modulos", "fuel_overlay.py")
         try: subprocess.Popen([sys.executable, script_path])
         except Exception as e: messagebox.showerror("Erro", str(e))
 

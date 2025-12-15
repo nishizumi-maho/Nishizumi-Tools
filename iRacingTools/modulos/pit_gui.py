@@ -25,6 +25,10 @@ class PitConfigWindow(ctk.CTkToplevel):
         self.btn_bind = ctk.CTkButton(f_bind, text=self.manager.config.get("bind_code", "KEY:F6"), command=self.start_bind, width=160)
         self.btn_bind.pack(side="right", padx=10)
 
+        self.var_enable_pygame = ctk.BooleanVar(value=bool(self.manager.config.get("enable_pygame", False)))
+        self.chk_enable_pygame = ctk.CTkCheckBox(f_bind, text="Permitir pygame/joystick", variable=self.var_enable_pygame)
+        self.chk_enable_pygame.pack(anchor="w", padx=10, pady=(8, 0))
+
         # ============ Chat ============
         f_chat = ctk.CTkFrame(self)
         f_chat.pack(pady=8, padx=16, fill="x")
@@ -100,7 +104,7 @@ class PitConfigWindow(ctk.CTkToplevel):
     def start_bind(self):
         self.btn_bind.configure(text="Aperte...", fg_color="orange")
         self.update()
-        code = capture_input_scan()
+        code = capture_input_scan(allow_joystick=bool(self.var_enable_pygame.get()))
         if code:
             self.btn_bind.configure(text=code, fg_color="#1f538d")
         else:
@@ -127,6 +131,8 @@ class PitConfigWindow(ctk.CTkToplevel):
 
         self.manager.config["cmd_when_on"] = self.entry_cmd_on.get().strip() or self.manager.config.get("cmd_when_on", "#-cleartires #ws")
         self.manager.config["cmd_when_off"] = self.entry_cmd_off.get().strip() or self.manager.config.get("cmd_when_off", "#cleartires #-ws")
+
+        self.manager.config["enable_pygame"] = bool(self.var_enable_pygame.get())
 
         try:
             self.manager.config["debounce_ms"] = int(float(self.entry_db.get()))
