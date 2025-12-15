@@ -1,0 +1,102 @@
+{
+    "version": 2,
+    "key_name": "P",
+    "scan_code": 25,
+    "key_extended": false,
+    "global": {
+        "enabled": true,
+        "tick_hz": 20,
+        "ignore_in_pits": true,
+        "min_my_speed_kmh": 0.0,
+        "global_press_spacing_s": 0.12,
+        "max_flashes_per_min": 40,
+        "debug": false
+    },
+    "rules": {
+        "pass_request": {
+            "enabled": true,
+            "priority": 2,
+            "cooldown_s": 3.0,
+            "lookahead_s": 6.0,
+            "trigger_gap_s": 0.8,
+            "require_diff_class": true,
+            "min_rel_speed_kmh": 8.0,
+            "ignore_target_off_track": true,
+            "pattern": {
+                "flashes": 3,
+                "min_interval_s": 0.5,
+                "max_interval_s": 1.2,
+                "hold_s": 0.06
+            }
+        },
+        "safety_approach": {
+            "enabled": true,
+            "priority": 1,
+            "cooldown_s": 1.5,
+            "lookahead_s": 6.0,
+            "trigger_gap_s": 1.0,
+            "closing_rate_s_per_s": 0.7,
+            "pattern": {
+                "flashes": 1,
+                "min_interval_s": 0.0,
+                "max_interval_s": 0.0,
+                "hold_s": 0.06
+            }
+        },
+        "hazard_ahead": {
+            "enabled": true,
+            "priority": 0,
+            "cooldown_s": 4.0,
+            "lookahead_s": 8.0,
+            "trigger_gap_s": 2.0,
+            "trigger_off_track": true,
+            "trigger_slow_target": true,
+            "target_speed_kmh_below": 60.0,
+            "closing_rate_s_per_s": 1.2,
+            "pattern": {
+                "flashes": 1,
+                "min_interval_s": 0.0,
+                "max_interval_s": 0.0,
+                "hold_s": 0.06
+            }
+        },
+        "slow_car_ahead": {
+            "enabled": true,
+            "priority": 1,
+            "cooldown_s": 4.0,
+            "lookahead_s": 8.0,
+            "trigger_gap_s": 1.5,
+            "target_speed_kmh_below": 80.0,
+            "only_if_on_track": true,
+            "pattern": {
+                "flashes": 2,
+                "min_interval_s": 0.25,
+                "max_interval_s": 0.45,
+                "hold_s": 0.06
+            }
+        },
+        "pit_exit_merge": {
+            "enabled": true,
+            "priority": 1,
+            "cooldown_s": 10.0,
+            "pattern": {
+                "flashes": 2,
+                "min_interval_s": 0.25,
+                "max_interval_s": 0.45,
+                "hold_s": 0.06
+            }
+        },
+        "self_off_track_hazard": {
+            "enabled": true,
+            "priority": 0,
+            "cooldown_s": 8.0,
+            "min_speed_kmh": 30.0,
+            "pattern": {
+                "flashes": 2,
+                "min_interval_s": 0.2,
+                "max_interval_s": 0.35,
+                "hold_s": 0.06
+            }
+        }
+    }
+}

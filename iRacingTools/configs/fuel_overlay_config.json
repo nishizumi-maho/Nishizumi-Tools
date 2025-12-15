@@ -1,0 +1,60 @@
+{
+    "method": "road_fav",
+    "n": 10,
+    "top_percent": 20.0,
+    "margin_laps": 1.0,
+    "margin_step": 0.5,
+    "ignore_yellow": true,
+    "plan_mode": "attack",
+    "plan_modes": {
+        "safe": {
+            "margin_override": 1.5,
+            "take_tires": true
+        },
+        "attack": {
+            "margin_override": 0.5,
+            "take_tires": false
+        },
+        "stretch": {
+            "margin_override": 1.0,
+            "take_tires": false
+        }
+    },
+    "pit": {
+        "pit_base_loss_s": 40.0,
+        "fuel_fill_rate": 2.5,
+        "tire_service_time_s": 18.0,
+        "clean_air_target_s": 2.0
+    },
+    "macro": {
+        "enabled": false,
+        "chat_key": "t",
+        "open_delay": 0.02,
+        "injection": "type",
+        "typing_interval": 0.001,
+        "require_iracing_foreground": true,
+        "iracing_window_substring": "iracing",
+        "debounce_ms": 250,
+        "templates": {
+            "apply_plan": "#fuel {fuel_add:.2f}",
+            "wet_preset": "",
+            "slick_preset": ""
+        }
+    },
+    "hotkeys": {
+        "margin_up": "ctrl+alt+up",
+        "margin_down": "ctrl+alt+down",
+        "cycle_plan": "ctrl+alt+p",
+        "apply_opt1": "alt+1",
+        "apply_opt2": "alt+2",
+        "apply_opt3": "alt+3",
+        "wet": "alt+w",
+        "slick": "alt+s"
+    },
+    "audio": {
+        "risk_beep": true,
+        "beep_cooldown_s": 3.0,
+        "risk_beep_threshold": 85
+    },
+    "geometry": "360x300+115+75"
+}
