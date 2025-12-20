@@ -757,12 +757,31 @@ class WetnessBrain:
         aqua = self.aquaplane_events.count_last(35.0, now)
         trend = self.wetness_trend()
 
+        # Heurística para corrigir bug clássico do iRacing:
+        # TrackWetness travado em 1.0 (100%) mesmo com pista seca.
+        #
+        # Se:
+        #  - pista não está declarada molhada
+        #  - praticamente sem chuva
+        #  - grip alto (~seco)
+        #  - nenhum evento de aquaplanagem
+        # então tratamos o "wet" efetivo como quase seco.
+        wet_eff = wet
+        if (
+            wet is not None and wet > 0.85
+            and (declared_wet is False or declared_wet is None)
+            and (prec is None or prec < 0.02)
+            and (grip is None or grip > 0.90)
+            and aqua == 0
+        ):
+            wet_eff = 0.05  # ~5% → praticamente seco
+
         score = 0.0
         if declared_wet:
             score += 12.0
 
-        if wet is not None:
-            score += max(0.0, min(1.0, (wet - 0.12) / 0.28)) * 45.0
+        if wet_eff is not None:
+            score += max(0.0, min(1.0, (wet_eff - 0.12) / 0.28)) * 45.0
 
         if prec is not None:
             score += max(0.0, min(1.0, prec / 0.6)) * 10.0
@@ -785,6 +804,7 @@ class WetnessBrain:
 
         details = {
             "wet": wet,
+            "wet_eff": wet_eff,
             "prec": prec,
             "grip": grip,
             "aqua": aqua,
@@ -827,8 +847,6 @@ class RiskRadar:
         if brake is not None:
             self.brake_hist.add(float(brake))
 
-        # precisa pelo menos do índice do player, a posição dele
-        # e alguma informação de outros carros
         if (
             player_idx is None
             or player_lapdist_pct is None
@@ -840,12 +858,11 @@ class RiskRadar:
             pidx = int(player_idx)
             ppct = float(player_lapdist_pct)
 
-            # se o comprimento da pista não veio ou veio zoado, usa ~5 km
             if track_length_m is None:
                 tlen = 5000.0
             else:
                 tlen = float(track_length_m)
-                if tlen <= 100.0:  # muito pequeno para um circuito
+                if tlen <= 100.0:
                     tlen = 5000.0
         except Exception:
             return 0, "(no traffic data)"
@@ -867,7 +884,8 @@ class RiskRadar:
                 overlap = False
 
         steer_var = self.steer_hist.stdev() or 0.0
-        instability = max(0.0, min(1.0, steer_var / 0.25))  # heuristic scaling
+        # suavizado: menos sensível a micro correções
+        instability = max(0.0, min(1.0, steer_var / 0.30))
 
         best_behind = (0.0, 0.0, 0.0, None)  # score, closing, dist, caridx
         best_ahead = (0.0, 0.0, 0.0, None)
@@ -885,14 +903,14 @@ class RiskRadar:
             except Exception:
                 continue
 
-            if abs(dist_m) > 250.0:
+            if abs(dist_m) > 300.0:
                 continue
 
             closing = 0.0
             prev = self.prev_dist_m.get(i)
             if prev is not None:
                 prev_dist, prev_t = prev
-                dt = max(0.02, now - prev_t)
+                dt = max(0.05, now - prev_t)
                 if dist_m < 0:
                     closing = (dist_m - prev_dist) / dt
                 else:
@@ -900,28 +918,28 @@ class RiskRadar:
 
             self.prev_dist_m[i] = (dist_m, now)
 
+            d = abs(dist_m)
+
             if dist_m < 0:
-                # carro atrás (dist_m negativo)
-                d = abs(dist_m)
+                # carro atrás
                 score = 0.0
-                if d < 60.0:
-                    score += (60.0 - d) / 60.0 * 20.0
-                if closing > 3.0:
-                    score += min(25.0, (closing - 3.0) / 6.0 * 25.0)
+                if d < 80.0:
+                    score += (80.0 - d) / 80.0 * 15.0
+                if closing > 2.0:
+                    score += min(22.0, (closing - 2.0) / 6.0 * 22.0)
                 if braking:
-                    score += 10.0
+                    score += 6.0
                 if overlap:
                     score += 10.0
                 if score > best_behind[0]:
                     best_behind = (score, closing, dist_m, i)
             else:
                 # carro à frente
-                d = abs(dist_m)
                 score = 0.0
-                if d < 35.0:
-                    score += (35.0 - d) / 35.0 * 15.0
-                if closing > 3.0 and braking:
-                    score += min(20.0, (closing - 3.0) / 6.0 * 20.0)
+                if d < 45.0:
+                    score += (45.0 - d) / 45.0 * 12.0
+                if closing > 2.5 and braking:
+                    score += min(18.0, (closing - 2.5) / 6.0 * 18.0)
                 if overlap:
                     score += 8.0
                 if score > best_ahead[0]:
@@ -943,18 +961,18 @@ class RiskRadar:
             reasons.append(f"ahead {abs(dist):.0f}m closing {closing:+.1f}m/s")
 
         if overlap and braking:
-            risk += 18.0
+            risk += 15.0
             reasons.append("overlap+brake")
         elif overlap:
-            risk += 10.0
+            risk += 8.0
             reasons.append("overlap")
 
         if is_on_track is False:
-            risk += 25.0
+            risk += 22.0
             reasons.append("offtrack/rejoin")
 
-        risk += instability * 18.0
-        if instability > 0.6:
+        risk += instability * 15.0
+        if instability > 0.7:
             reasons.append("instability")
 
         risk_i = int(max(0, min(100, round(risk))))
@@ -1064,7 +1082,8 @@ class PitWindowAdvisor:
             target_total = (laps_remaining_after + float(margin_laps)) * float(burn_per_lap)
             return max(0.0, target_total - fuel_after_wait), target_total, "finish"
 
-        for offset in range(0, int(max_offsets) + 1):
+        # Sempre só avaliamos a opção de parar AGORA (offset 0)
+        for offset in (0,):
             # Ensure we can wait offset laps on current fuel (rough guard)
             if laps_possible is not None and laps_possible < float(offset) + 0.15:
                 continue
@@ -1423,6 +1442,7 @@ class FuelOverlayApp(ctk.CTk):
         # cache
         self._last_calc: Dict[str, Any] = {}
         self._last_pit_options: List[PitOption] = []
+        self._prev_in_pit_stall: Optional[bool] = None
 
         # window
         self.title(APP_NAME)
@@ -1518,6 +1538,7 @@ class FuelOverlayApp(ctk.CTk):
                 "require_iracing_foreground": True,
                 "iracing_window_substring": "iracing",
                 "debounce_ms": 250,
+                "auto_fuel_on_pit": False,  # <--- NOVO
                 "templates": {
                     "apply_plan": "#fuel {fuel_add:.2f}",
                     "wet_preset": "",
@@ -2013,6 +2034,15 @@ class FuelOverlayApp(ctk.CTk):
         self.var_macro_enabled = ctk.BooleanVar(value=bool(self.config_data["macro"].get("enabled", False)))
         ctk.CTkCheckBox(sf, text="Enable chat macros", variable=self.var_macro_enabled).pack(anchor="w")
 
+        self.var_macro_auto_fuel = ctk.BooleanVar(
+            value=bool(self.config_data["macro"].get("auto_fuel_on_pit", False))
+        )
+        ctk.CTkCheckBox(
+            sf,
+            text="Auto fuel on pit entry (use apply template)",
+            variable=self.var_macro_auto_fuel,
+        ).pack(anchor="w")
+
         self.entry_chatkey = self._settings_entry(sf, "Chat key:", self.config_data["macro"].get("chat_key", "t"), width=120)
         self.entry_apply_tmpl = self._settings_entry(sf, "Apply plan template:", self.config_data["macro"].get("templates", {}).get("apply_plan", "#fuel {fuel_add:.2f}"), width=320)
 
@@ -2210,6 +2240,7 @@ class FuelOverlayApp(ctk.CTk):
         # Macro
         self.config_data["macro"]["enabled"] = bool(self.var_macro_enabled.get())
         self.config_data["macro"]["chat_key"] = str(self.entry_chatkey.get() or "t")
+        self.config_data["macro"]["auto_fuel_on_pit"] = bool(self.var_macro_auto_fuel.get())
         self.config_data["macro"].setdefault("templates", {})
         self.config_data["macro"]["templates"]["apply_plan"] = str(self.entry_apply_tmpl.get() or "#fuel {fuel_add:.2f}")
 
@@ -2447,6 +2478,7 @@ class FuelOverlayApp(ctk.CTk):
     def _tick(self) -> None:
         refresh_ms = int(self.config_data["ui"].get("refresh_ms", 150))
         refresh_ms = max(60, min(refresh_ms, 500))
+        entered_stall = False
 
         try:
             # read quick params
@@ -2541,6 +2573,26 @@ class FuelOverlayApp(ctk.CTk):
             pits_open = self._safe_get("PitsOpen")
             in_pit_stall = self._safe_get("PlayerCarInPitStall")
 
+            # Detectar entrada no pit stall (para auto fuel macro)
+            try:
+                if in_pit_stall is not None:
+                    in_stall_flag = bool(in_pit_stall)
+                else:
+                    # fallback: em pit road e praticamente parado
+                    if on_pit_road is not None and bool(on_pit_road) and speed is not None:
+                        in_stall_flag = float(speed) < 1.0
+                    else:
+                        in_stall_flag = False
+            except Exception:
+                in_stall_flag = False
+
+            if self._prev_in_pit_stall is None:
+                entered_stall = False
+            else:
+                entered_stall = (self._prev_in_pit_stall is False and in_stall_flag is True)
+
+            self._prev_in_pit_stall = in_stall_flag
+
             # Pit service selections (if available)
             pit_sv_flags = self._safe_get("PitSvFlags")
             pit_sv_fuel = self._safe_get("PitSvFuel")
@@ -2589,6 +2641,31 @@ class FuelOverlayApp(ctk.CTk):
                 if fuel_need_total is not None:
                     fuel_to_add = max(0.0, fuel_need_total - fuel)
                     finish_leftover = fuel + fuel_to_add - fuel_need_total
+
+            # Auto fuel: ao entrar no pit stall, manda macro com fuel_to_add
+            if (
+                entered_stall
+                and self.config_data.get("macro", {}).get("enabled", False)
+                and self.config_data.get("macro", {}).get("auto_fuel_on_pit", False)
+                and fuel_to_add is not None
+            ):
+                tmpl = self.config_data.get("macro", {}).get("templates", {}).get(
+                    "apply_plan", "#fuel {fuel_add:.2f}"
+                )
+                ctx = _SafeFormatDict(
+                    {
+                        "fuel_add": float(fuel_to_add),
+                        "offset_laps": 0,
+                        "pit_loss_s": 0.0,
+                        "plan_mode": str(self.config_data["fuel"].get("plan_mode", "safe")),
+                        "success_pct": 0,
+                    }
+                )
+                try:
+                    cmd = str(tmpl).format_map(ctx)
+                except Exception:
+                    cmd = f"#fuel {float(fuel_to_add):.2f}"
+                self.injector.send(cmd)
 
             # wetness brain
             now = time.time()
@@ -2816,7 +2893,11 @@ class FuelOverlayApp(ctk.CTk):
         return None
 
     def _format_weather_line(self, track_temp, declared_wet, action: str, conf: int, details: Dict[str, Any]) -> str:
-        wet = details.get("wet")
+        # usamos wet_eff (corrigido) se existir, senão o wet bruto
+        wet = details.get("wet_eff")
+        if wet is None:
+            wet = details.get("wet")
+
         prec = details.get("prec")
         grip = details.get("grip")
         aqua = details.get("aqua")
