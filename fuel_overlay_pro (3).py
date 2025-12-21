@@ -55,6 +55,11 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 import customtkinter as ctk
 
 try:
+    import yaml  # type: ignore
+except Exception:
+    yaml = None
+
+try:
     import keyboard  # type: ignore
 except Exception:
     keyboard = None
@@ -1447,6 +1452,7 @@ class FuelOverlayApp(ctk.CTk):
         self._last_calc: Dict[str, Any] = {}
         self._last_pit_options: List[PitOption] = []
         self._prev_in_pit_stall: Optional[bool] = None
+        self._session_info_cache: Optional[Dict[str, Any]] = None
 
         # window
         self.title(APP_NAME)
@@ -2559,6 +2565,78 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             return None
 
+    def _get_session_info(self) -> Optional[Dict[str, Any]]:
+        """Return parsed SessionInfo YAML if available (cached)."""
+
+        # Prefer a cached copy to avoid reparsing on every frame.
+        if self._session_info_cache is not None:
+            return self._session_info_cache
+
+        # Newer pyirsdk exposes helpers; fall back to manual access.
+        raw_info = None
+        try:
+            if hasattr(self.ir, "get_session_info"):
+                data = self.ir.get_session_info()
+                if isinstance(data, dict):
+                    self._session_info_cache = data
+                    return data
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.ir, "get_session_info_str"):
+                raw_info = self.ir.get_session_info_str()
+        except Exception:
+            raw_info = None
+
+        if raw_info is None:
+            raw_info = self._safe_get("SessionInfo")
+
+        if raw_info is None or yaml is None:
+            return None
+
+        try:
+            info = yaml.safe_load(raw_info)
+            if isinstance(info, dict):
+                self._session_info_cache = info
+                return info
+        except Exception:
+            return None
+        return None
+
+    def _session_track_length_m(self, session_info: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not session_info:
+            return None
+        try:
+            return self._track_length_m(session_info.get("WeekendInfo", {}).get("TrackLength"))
+        except Exception:
+            return None
+
+    def _session_tank_capacity_l(self, session_info: Optional[Dict[str, Any]]) -> Optional[float]:
+        if not session_info:
+            return None
+
+        try:
+            driver = session_info.get("DriverInfo", {})
+            tank_l = driver.get("DriverCarFuelMaxLtr")
+            max_pct = driver.get("DriverCarMaxFuelPct")
+        except Exception:
+            return None
+
+        try:
+            if tank_l is None:
+                return None
+            cap = float(tank_l)
+            if max_pct is not None:
+                pct = float(max_pct)
+                if pct > 1.5:
+                    pct = pct / 100.0
+                pct = max(0.0, min(pct, 1.0))
+                cap = cap * pct
+            return cap if cap > 0 else None
+        except Exception:
+            return None
+
     @staticmethod
     def _track_length_m(val: Any) -> Optional[float]:
         """Converte TrackLength do iRacing para metros.
@@ -2653,11 +2731,11 @@ class FuelOverlayApp(ctk.CTk):
             # fuel plan mode
             fuel_plan_mode = str(self.config_data["fuel"].get("fuel_plan_mode", "finish"))
             stint_target_laps = float(self.config_data["fuel"].get("stint_target_laps", 20.0))
-            tank_capacity = self.config_data["fuel"].get("tank_capacity", None)
+            tank_capacity_cfg = self.config_data["fuel"].get("tank_capacity", None)
             try:
-                tank_capacity = float(tank_capacity) if tank_capacity is not None else None
+                tank_capacity_cfg = float(tank_capacity_cfg) if tank_capacity_cfg is not None else None
             except Exception:
-                tank_capacity = None
+                tank_capacity_cfg = None
 
             if not self.ir:
                 self.lbl_status.configure(text="pyirsdk not found. Install: pip install pyirsdk")
@@ -2666,6 +2744,7 @@ class FuelOverlayApp(ctk.CTk):
 
             # connect
             if not (getattr(self.ir, "is_initialized", False) and getattr(self.ir, "is_connected", False)):
+                self._session_info_cache = None
                 try:
                     self.ir.startup()
                 except Exception:
@@ -2680,6 +2759,8 @@ class FuelOverlayApp(ctk.CTk):
                 self.ir.freeze_var_buffer_latest()
             except Exception:
                 pass
+
+            session_info = self._get_session_info()
 
             # telemetry
             fuel_level = self._safe_get("FuelLevel")
@@ -2714,6 +2795,13 @@ class FuelOverlayApp(ctk.CTk):
                     car_idx_lapdist = None
 
             track_len_m = self._track_length_m(self._safe_get("TrackLength"))
+            if track_len_m is None:
+                track_len_m = self._session_track_length_m(session_info)
+
+            # Tank capacity: prefer session info when available (DriverCarFuelMaxLtr/DriverCarMaxFuelPct)
+            tank_capacity = self._session_tank_capacity_l(session_info)
+            if tank_capacity is None:
+                tank_capacity = tank_capacity_cfg
 
             # Pit window variables (if available)
             pits_open = self._safe_get("PitsOpen")
