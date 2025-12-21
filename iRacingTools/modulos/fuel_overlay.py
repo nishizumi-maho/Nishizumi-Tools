@@ -1439,6 +1439,7 @@ class FuelOverlayApp(ctk.CTk):
     }
 
     DEFAULT_APPLY_MACRO = "#fuel {fuel_add:.2f}$"
+    PIT_CAL_KEYS = ("pit_base_loss_s", "fuel_fill_rate", "tire_service_time_s", "tires_with_fuel")
 
     def __init__(self, *, portable: bool = False):
         super().__init__()
@@ -1448,6 +1449,8 @@ class FuelOverlayApp(ctk.CTk):
         self.portable = bool(portable)
         self.config_dir, self.config_file = _get_config_paths(self.portable)
         self.config_data = self._load_config()
+
+        self._active_profile_key: Optional[str] = None
 
         # IRSDK
         self.ir = irsdk.IRSDK() if irsdk else None
@@ -1575,10 +1578,17 @@ class FuelOverlayApp(ctk.CTk):
                 "debounce_ms": 250,
                 "auto_fuel_on_pit": False,  # <--- NOVO
                 "templates": {
-                    "apply_plan": DEFAULT_APPLY_MACRO,
+                    "apply_plan": self.DEFAULT_APPLY_MACRO,
                     "wet_preset": "",
                     "slick_preset": "",
                 },
+            },
+            "pit_profiles": {},
+            "pit_profile_defaults": {
+                "pit_base_loss_s": 40.0,
+                "fuel_fill_rate": 2.5,
+                "tire_service_time_s": 18.0,
+                "tires_with_fuel": False,
             },
             "hotkeys": {
                 "margin_up": "ctrl+alt+up",
@@ -1624,6 +1634,90 @@ class FuelOverlayApp(ctk.CTk):
             pass
 
         return cfg
+
+    @staticmethod
+    def _sanitize_profile_piece(text: str) -> str:
+        safe = text.strip() if text else ""
+        return safe.replace("/", "-")
+
+    def _pit_profile_template(self) -> Dict[str, Any]:
+        base = self.config_data.get("pit_profile_defaults")
+        if not isinstance(base, dict):
+            base = {k: self._default_config()["pit_profile_defaults"].get(k) for k in self.PIT_CAL_KEYS}
+            self.config_data["pit_profile_defaults"] = base
+        return dict(base)
+
+    def _profile_key_from_session(self, session_info: Optional[Dict[str, Any]]) -> str:
+        track = "pista_desconhecida"
+        car = "carro_desconhecido"
+
+        try:
+            w = session_info.get("WeekendInfo", {}) if session_info else {}
+            t_disp = w.get("TrackDisplayName") or w.get("TrackDisplayShortName") or w.get("TrackName")
+            t_cfg = w.get("TrackConfigName") or w.get("TrackVariation")
+            pieces = [p for p in [t_disp, t_cfg] if p]
+            if pieces:
+                track = " - ".join(self._sanitize_profile_piece(str(p)) for p in pieces)
+        except Exception:
+            pass
+
+        try:
+            d = session_info.get("DriverInfo", {}) if session_info else {}
+            car = d.get("DriverCarScreenName") or d.get("DriverCarModel") or car
+            drivers = d.get("Drivers") or []
+            for drv in drivers:
+                try:
+                    if bool(drv.get("IsPlayerCar")):
+                        car = drv.get("CarScreenName") or drv.get("CarModel") or car
+                        break
+                except Exception:
+                    continue
+            car = self._sanitize_profile_piece(str(car))
+        except Exception:
+            pass
+
+        return f"{car} @ {track}"
+
+    def _persist_active_profile(self) -> None:
+        if not self._active_profile_key:
+            return
+
+        profiles = self.config_data.setdefault("pit_profiles", {})
+        profile = profiles.get(self._active_profile_key, {})
+        for k in self.PIT_CAL_KEYS:
+            if k in self.config_data.get("pit", {}):
+                profile[k] = self.config_data["pit"].get(k)
+        profiles[self._active_profile_key] = profile
+
+    def _maybe_switch_pit_profile(self, session_info: Optional[Dict[str, Any]]) -> None:
+        profiles = self.config_data.setdefault("pit_profiles", {})
+        template = self._pit_profile_template()
+        new_key = self._profile_key_from_session(session_info)
+
+        if self._active_profile_key == new_key:
+            return
+
+        # save current profile before swapping
+        self._persist_active_profile()
+
+        profile = profiles.get(new_key)
+        if not isinstance(profile, dict):
+            profile = dict(template)
+            # seed with current pit values if available
+            for k in self.PIT_CAL_KEYS:
+                if k in self.config_data.get("pit", {}):
+                    profile[k] = self.config_data["pit"].get(k, profile.get(k))
+            profiles[new_key] = profile
+
+        for k in self.PIT_CAL_KEYS:
+            if k in profile:
+                self.config_data["pit"][k] = profile.get(k, template.get(k))
+
+        self._active_profile_key = new_key
+        try:
+            self.pit_profile_label.set(f"Perfil ativo: {new_key} (dados salvos por carro/pista)")
+        except Exception:
+            pass
 
     def _map_legacy_config(self, legacy: Dict[str, Any]) -> Dict[str, Any]:
         """Best-effort mapping from the older single-level config to the new schema."""
@@ -1677,6 +1771,7 @@ class FuelOverlayApp(ctk.CTk):
     def _save_config(self) -> None:
         try:
             _ensure_dir(self.config_dir)
+            self._persist_active_profile()
             try:
                 self.config_data["ui"]["geometry"] = self.geometry()
             except Exception:
@@ -2228,6 +2323,15 @@ class FuelOverlayApp(ctk.CTk):
             text_color="#b0b0b0",
         ).pack(fill="x", pady=(4, 0))
 
+        self.pit_profile_label = ctk.StringVar()
+        ctk.CTkLabel(
+            sf,
+            textvariable=self.pit_profile_label,
+            anchor="w",
+            wraplength=520,
+            text_color="#9ad6ff",
+        ).pack(fill="x", pady=(2, 0))
+
         self.lbl_pit_model_note = ctk.CTkLabel(
             sf,
             text="Pit times are auto-calibrated from telemetry.",
@@ -2236,6 +2340,18 @@ class FuelOverlayApp(ctk.CTk):
             text_color="#a0a0a0",
         )
         self.lbl_pit_model_note.pack(fill="x", pady=(4, 4))
+
+        self.lbl_pit_profile_hint = ctk.CTkLabel(
+            sf,
+            text=(
+                "Faça ao menos um pitstop de teste com combustível/pneus iguais aos da corrida "
+                "para que o modelo tenha dados reais deste carro e pista."
+            ),
+            anchor="w",
+            wraplength=520,
+            text_color="#ffcc66",
+        )
+        self.lbl_pit_profile_hint.pack(fill="x", pady=(0, 6))
 
         # Auto calibration toggles
         ctk.CTkLabel(sf, text="Auto-calibration (from telemetry pit stops)", font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", pady=(10, 4))
@@ -2313,7 +2429,7 @@ class FuelOverlayApp(ctk.CTk):
     def _refresh_pit_entry_state(self) -> None:
         auto_on = bool(self.var_ac_enabled.get())
         note = (
-            "Pit times are auto-calibrated from telemetry."
+            "Pit times are auto-calibrated from telemetry e salvos por carro/pista."
             if auto_on
             else "Auto-calibration disabled; o modelo congela nos valores já coletados."
         )
@@ -2510,6 +2626,8 @@ class FuelOverlayApp(ctk.CTk):
         self.config_data["macro"]["enabled"] = bool(self.var_macro_enabled.get())
         self.config_data["macro"]["chat_key"] = str(self.entry_chatkey.get() or "t")
         self.config_data["macro"]["auto_fuel_on_pit"] = bool(self.var_macro_auto_fuel.get())
+
+        self._persist_active_profile()
 
     def _apply_config_runtime(self) -> None:
         # window flags
@@ -2969,6 +3087,7 @@ class FuelOverlayApp(ctk.CTk):
                 pass
 
             session_info = self._get_session_info()
+            self._maybe_switch_pit_profile(session_info)
 
             # telemetry
             fuel_level = self._safe_get("FuelLevel")
@@ -3315,6 +3434,7 @@ class FuelOverlayApp(ctk.CTk):
                 pit["tire_service_time_s"] = (1 - alpha) * cur + alpha * tire_est
 
         self._sync_pit_entries_from_config()
+        self._persist_active_profile()
 
     def _estimate_laps_remaining(self, avg_lap_time: Optional[float]) -> Optional[float]:
         # 1) SessionLapsRemainEx
