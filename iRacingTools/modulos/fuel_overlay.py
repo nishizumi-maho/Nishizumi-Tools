@@ -1177,8 +1177,9 @@ class PitWindowAdvisor:
 
             # crude position estimate (higher gaps_after >0 means cars ahead after pit)
             pos_est = None
-            if gaps_after:
-                pos_est = 1 + sum(1 for g in gaps_after if g > 0)
+            pos_pool = relevant if relevant else gaps_after
+            if pos_pool:
+                pos_est = 1 + sum(1 for g in pos_pool if g > 0)
 
             notes = plan_note
             if fuel_add is None:
@@ -1546,6 +1547,7 @@ class FuelOverlayApp(ctk.CTk):
                 "pit_base_loss_s": 40.0,
                 "fuel_fill_rate": 2.5,
                 "tire_service_time_s": 18.0,
+                "tires_with_fuel": False,
                 "clean_air_target_s": 2.0,
                 "max_offsets": 3,
                 "auto_calibrate": {
@@ -1732,6 +1734,7 @@ class FuelOverlayApp(ctk.CTk):
         # Fuel/Race
         self.var_fuel = ctk.StringVar(value="Fuel: --")
         self.var_race = ctk.StringVar(value="Race: --")
+        self.var_need_callout = ctk.StringVar(value="Need: --")
 
         self.sec_fuel = self._mk_section(self.section_container, "FUEL & RACE", "fuel")
         self.lbl_fuel = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_fuel, anchor="w", font=("Consolas", 12, "bold"))
@@ -1741,6 +1744,16 @@ class FuelOverlayApp(ctk.CTk):
         self.lbl_race = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_race, anchor="w", font=("Consolas", 11))
         self.lbl_race.pack(fill="x", padx=8, pady=(0, 6))
         self._register_section_label("fuel", self.var_race, ("Consolas", 11), padx=8, pady=(0, 6))
+
+        self.lbl_need = ctk.CTkLabel(
+            self.sec_fuel,
+            textvariable=self.var_need_callout,
+            anchor="w",
+            font=("Consolas", 13, "bold"),
+            text_color="#f5c542",
+        )
+        self.lbl_need.pack(fill="x", padx=8, pady=(0, 6))
+        self._register_section_label("fuel", self.var_need_callout, ("Consolas", 13, "bold"), padx=8, pady=(0, 6))
 
         # Pit
         self.var_pit = ctk.StringVar(value="Pit: --")
@@ -2170,8 +2183,46 @@ class FuelOverlayApp(ctk.CTk):
         self.entry_pit_base = self._settings_entry(sf, "Base loss (s):", self.config_data["pit"].get("pit_base_loss_s", 40.0))
         self.entry_fill_rate = self._settings_entry(sf, "Fill rate (u/s):", self.config_data["pit"].get("fuel_fill_rate", 2.5))
         self.entry_tire_time = self._settings_entry(sf, "Tire time (s):", self.config_data["pit"].get("tire_service_time_s", 18.0))
+        self.var_tires_with_fuel = ctk.BooleanVar(value=bool(self.config_data["pit"].get("tires_with_fuel", False)))
+        ctk.CTkCheckBox(
+            sf,
+            text="Série abastece e troca pneus juntos (sem tempo extra de pneus)",
+            variable=self.var_tires_with_fuel,
+            command=self._refresh_pit_entry_state,
+        ).pack(anchor="w")
         self.entry_clean_air = self._settings_entry(sf, "Clean air target (s):", self.config_data["pit"].get("clean_air_target_s", 2.0))
         self.entry_offsets = self._settings_entry(sf, "Lookahead laps:", self.config_data["pit"].get("max_offsets", 3))
+
+        helper = ctk.CTkFrame(sf, fg_color="#1b1b1b")
+        helper.pack(fill="x", pady=(6, 6), padx=0)
+        ctk.CTkLabel(helper, text="Assistente de tempo de pit (para o pit window)", font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", padx=8, pady=(4, 2))
+        ctk.CTkLabel(
+            helper,
+            text="Informe um pit lane típico (inclui entrada/saída) e o quanto costuma reabastecer."
+            " Usamos a taxa de abastecimento configurada e o tempo de pneus para sugerir a perda base.",
+            anchor="w",
+            wraplength=520,
+            text_color="#b0b0b0",
+            font=("Segoe UI", 10),
+        ).pack(fill="x", padx=8, pady=(0, 6))
+
+        row_helper = ctk.CTkFrame(helper, fg_color="transparent")
+        row_helper.pack(fill="x", padx=8, pady=(0, 4))
+        ctk.CTkLabel(row_helper, text="Pit lane típico (s):", width=170, anchor="w").pack(side="left")
+        self.entry_helper_lane = ctk.CTkEntry(row_helper, width=90)
+        self.entry_helper_lane.insert(0, "60")
+        self.entry_helper_lane.pack(side="left")
+        ctk.CTkLabel(row_helper, text="Combustível adicionado:", width=160, anchor="w").pack(side="left", padx=(10, 0))
+        self.entry_helper_fuel = ctk.CTkEntry(row_helper, width=90)
+        self.entry_helper_fuel.insert(0, "15")
+        self.entry_helper_fuel.pack(side="left")
+
+        ctk.CTkButton(
+            helper,
+            text="Usar valores para preencher base",
+            command=self._apply_helper_pit_values,
+            width=220,
+        ).pack(anchor="w", padx=8, pady=(4, 6))
 
         self.lbl_pit_model_note = ctk.CTkLabel(
             sf,
@@ -2265,22 +2316,52 @@ class FuelOverlayApp(ctk.CTk):
             else "Manual overrides enabled for pit timing model."
         )
 
-        for ent in (self.entry_pit_base, self.entry_fill_rate, self.entry_tire_time):
+        tire_linked = bool(self.var_tires_with_fuel.get())
+        for ent in (self.entry_pit_base, self.entry_fill_rate):
             try:
                 ent.configure(state=state)
             except Exception:
                 pass
+
+        tire_state = state
+        if tire_linked:
+            tire_state = "disabled"
+            self._set_entry_value(self.entry_tire_time, 0.0)
+        try:
+            self.entry_tire_time.configure(state=tire_state)
+        except Exception:
+            pass
 
         try:
             self.lbl_pit_model_note.configure(text=note)
         except Exception:
             pass
 
+    def _apply_helper_pit_values(self) -> None:
+        try:
+            lane_time = float(self.entry_helper_lane.get())
+            fuel_added = float(self.entry_helper_fuel.get())
+            fill_rate = float(self.entry_fill_rate.get())
+            tire_time = 0.0 if bool(self.var_tires_with_fuel.get()) else float(self.entry_tire_time.get())
+        except Exception:
+            return
+
+        if fill_rate <= 0:
+            return
+
+        base_loss = lane_time - (fuel_added / fill_rate) - tire_time
+        base_loss = max(0.0, base_loss)
+        self._set_entry_value(self.entry_pit_base, round(base_loss, 1))
+
     def _sync_pit_entries_from_config(self) -> None:
         pit_cfg = self.config_data.get("pit", {})
         self._set_entry_value(self.entry_pit_base, pit_cfg.get("pit_base_loss_s", 40.0))
         self._set_entry_value(self.entry_fill_rate, pit_cfg.get("fuel_fill_rate", 2.5))
         self._set_entry_value(self.entry_tire_time, pit_cfg.get("tire_service_time_s", 18.0))
+        try:
+            self.var_tires_with_fuel.set(bool(pit_cfg.get("tires_with_fuel", False)))
+        except Exception:
+            pass
 
     def _apply_section_visibility(self) -> None:
         """Show/hide overlay sections while keeping a stable order."""
@@ -2431,6 +2512,10 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             pass
         try:
+            self.config_data["pit"]["tires_with_fuel"] = bool(self.var_tires_with_fuel.get())
+        except Exception:
+            pass
+        try:
             self.config_data["pit"]["clean_air_target_s"] = float(self.entry_clean_air.get())
         except Exception:
             pass
@@ -2523,6 +2608,8 @@ class FuelOverlayApp(ctk.CTk):
 
         # show/hide sections
         self._apply_section_visibility()
+        self._sync_pit_entries_from_config()
+        self._refresh_pit_entry_state()
 
     # ----------------------------
     # Drag handlers
@@ -3065,7 +3152,8 @@ class FuelOverlayApp(ctk.CTk):
             pit_cfg = self.config_data.get("pit", {})
             pit_base = float(pit_cfg.get("pit_base_loss_s", 40.0))
             fill_rate = float(pit_cfg.get("fuel_fill_rate", 2.5))
-            tire_time = float(pit_cfg.get("tire_service_time_s", 18.0))
+            tires_with_fuel = bool(pit_cfg.get("tires_with_fuel", False))
+            tire_time = 0.0 if tires_with_fuel else float(pit_cfg.get("tire_service_time_s", 18.0))
             clean_air_target = float(pit_cfg.get("clean_air_target_s", 2.0))
             max_offsets = int(pit_cfg.get("max_offsets", 3))
 
@@ -3120,6 +3208,8 @@ class FuelOverlayApp(ctk.CTk):
 
             self.lbl_status.configure(text=f"iRacing: {conn} ({status}){pits_open_s} | samples={len(self.history.samples)}", text_color=status_color)
 
+            need_line = "Need: --"
+            need_color = "#f5c542"
             if burn is None or burn <= 0 or laps_possible is None:
                 proj = self.history.projected_burn()
                 proj_s = "" if proj is None else f" (proj {proj:.3f}/lap)"
@@ -3131,16 +3221,29 @@ class FuelOverlayApp(ctk.CTk):
                     rem_s = "--" if laps_remain is None else f"{laps_remain:.1f}"
                     left_s = "--" if finish_leftover is None else f"{finish_leftover:.2f}"
                     plan_s = (fuel_plan_mode or "finish").upper()
+                    need_line = f"NEED {fuel_need_total:.2f} | Fuel agora {fuel:.2f}"
+                    if fuel >= fuel_need_total:
+                        need_line = need_line + " | SEM PARADA (fuel > need)"
+                        need_color = "#3ddc84"
+                    else:
+                        need_line = need_line + " | Pit necessário"
+                        need_color = "#ff8c42"
                     self.var_race.set(
                         f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={fuel_need_total:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
                     )
                 else:
                     self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
 
+            try:
+                self.var_need_callout.set(need_line)
+                self.lbl_need.configure(text_color=need_color)
+            except Exception:
+                pass
+
             self.var_weather.set(self._format_weather_line(track_temp, declared_wet, wet_action, wet_conf, wet_details))
             self.var_risk.set(f"Risk: {risk_score:3d} | {risk_reason}")
 
-            self.var_pit.set(self._format_pit_options(opts, pit_base, fill_rate, tire_time))
+            self.var_pit.set(self._format_pit_options(opts, pit_base, fill_rate, tire_time, tires_with_fuel))
 
             hk = self.config_data.get("hotkeys", {})
             self.var_hotkeys.set(
@@ -3269,12 +3372,15 @@ class FuelOverlayApp(ctk.CTk):
 
         return f"Wet={wet_s}{tr_s} Precip={prec_s} DeclWet={dw} TrackT={temp_s} | Grip~{grip_s} Aqua={aqua} | {action} ({conf}%)"
 
-    def _format_pit_options(self, opts: List[PitOption], pit_base: float, fill_rate: float, tire_time: float) -> str:
+    def _format_pit_options(
+        self, opts: List[PitOption], pit_base: float, fill_rate: float, tire_time: float, tires_with_fuel: bool = False
+    ) -> str:
         if not opts:
             return "Pit: -- (need avg lap time + traffic data)"
 
         lines = []
-        lines.append(f"Model: base={pit_base:.0f}s fill={fill_rate:.2f}u/s tires={tire_time:.0f}s")
+        tires_s = "with fuel" if tires_with_fuel else f"{tire_time:.0f}s"
+        lines.append(f"Model: base={pit_base:.0f}s fill={fill_rate:.2f}u/s tires={tires_s}")
         lines.append("Rank | When | Success | pos~ | gap(a/b) | add | pit | notes")
         for rank, o in enumerate(opts[:4], start=1):
             label = "NOW" if o.offset_laps == 0 else f"+{o.offset_laps}L"
