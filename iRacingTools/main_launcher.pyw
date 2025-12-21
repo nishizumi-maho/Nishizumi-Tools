@@ -2,6 +2,7 @@ import customtkinter as ctk
 import os
 import sys
 import subprocess
+import shutil
 import tkinter.messagebox
 from tkinter import messagebox
 import json
@@ -227,8 +228,32 @@ class LauncherApp(ctk.CTk):
 
     def launch_overlay(self):
         script_path = os.path.join(ROOT_DIR, "modulos", "fuel_overlay.py")
-        try: subprocess.Popen([sys.executable, script_path])
+        try:
+            python_exec = self._resolve_python_executable()
+            subprocess.Popen([python_exec, script_path])
         except Exception as e: messagebox.showerror("Erro", str(e))
+
+    def _resolve_python_executable(self):
+        """Tenta encontrar um interpretador Python que não seja o próprio launcher."""
+
+        base = os.path.basename(sys.executable).lower()
+        if "python" in base:
+            return sys.executable
+
+        # Tenta encontrar pythonw.exe / python.exe na mesma pasta
+        for candidate in ("pythonw.exe", "python.exe", "pythonw", "python"):
+            local = os.path.join(os.path.dirname(sys.executable), candidate)
+            if os.path.exists(local):
+                return local
+
+        # Busca no PATH
+        for candidate in ("pythonw", "python"):
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved
+
+        # Último recurso: retorna o executável atual (pode reabrir o launcher)
+        return sys.executable
 
     def on_close(self):
         self.save_settings()
