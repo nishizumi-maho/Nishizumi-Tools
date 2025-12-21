@@ -1822,6 +1822,68 @@ class FuelOverlayApp(ctk.CTk):
             tmpl = str(tmpl) + "$"
         return str(tmpl)
 
+    def _send_pit_fuel_via_sdk(self, fuel_liters: float) -> bool:
+        """Try to set pit fuel directly via the iRacing SDK.
+
+        Falls back to False when the SDK isn't available or when the
+        current binding doesn't expose a compatible API.
+        """
+
+        if irsdk is None or self.ir is None:
+            return False
+
+        if not getattr(self.ir, "is_initialized", False) or not getattr(self.ir, "is_connected", False):
+            return False
+
+        try:
+            for attr in ("pit_command", "pitCommand"):
+                if hasattr(self.ir, attr):
+                    pit_cmd = getattr(self.ir, attr)
+                    try:
+                        pit_cmd(fuel=float(fuel_liters))
+                        return True
+                    except TypeError:
+                        try:
+                            pit_cmd(float(fuel_liters))
+                            return True
+                        except Exception:
+                            pass
+        except Exception:
+            return False
+
+        return False
+
+    def _dispatch_fuel_macro(
+        self,
+        fuel_add: float,
+        *,
+        offset_laps: int = 0,
+        pit_loss_s: float = 0.0,
+        success_pct: int = 0,
+    ) -> None:
+        """Apply fuel command via SDK first, falling back to chat macro."""
+
+        fuel_add_val = max(0.0, float(fuel_add))
+
+        if self._send_pit_fuel_via_sdk(fuel_add_val):
+            return
+
+        tmpl = self._apply_plan_template()
+        ctx = _SafeFormatDict(
+            {
+                "fuel_add": fuel_add_val,
+                "offset_laps": int(offset_laps),
+                "pit_loss_s": float(pit_loss_s),
+                "plan_mode": str(self.config_data["fuel"].get("plan_mode", "safe")),
+                "success_pct": int(success_pct),
+            }
+        )
+        try:
+            cmd = str(tmpl).format_map(ctx)
+        except Exception:
+            cmd = f"#fuel {fuel_add_val:.2f}"
+        self.injector.send(cmd)
+
     # ----------------------------
     # UI build
     # ----------------------------
@@ -2838,21 +2900,12 @@ class FuelOverlayApp(ctk.CTk):
             if opt.fuel_add is None:
                 return
 
-            tmpl = self._apply_plan_template()
-            ctx = _SafeFormatDict(
-                {
-                    "fuel_add": float(opt.fuel_add),
-                    "offset_laps": int(opt.offset_laps),
-                    "pit_loss_s": float(opt.pit_loss_s or 0.0),
-                    "plan_mode": str(self.config_data["fuel"].get("plan_mode", "safe")),
-                    "success_pct": int(opt.success_pct or 0),
-                }
+            self._dispatch_fuel_macro(
+                float(opt.fuel_add),
+                offset_laps=int(opt.offset_laps),
+                pit_loss_s=float(opt.pit_loss_s or 0.0),
+                success_pct=int(opt.success_pct or 0),
             )
-            try:
-                cmd = str(tmpl).format_map(ctx)
-            except Exception:
-                cmd = f"#fuel {float(opt.fuel_add):.2f}"
-            self.injector.send(cmd)
 
         def toggle_settings():
             cur = self.tabs.get()
@@ -3254,23 +3307,15 @@ class FuelOverlayApp(ctk.CTk):
             # Auto fuel: ao entrar no pit stall, manda macro com fuel_to_add
             macro_cfg = self.config_data.get("macro", {})
             auto_fuel_enabled = bool(macro_cfg.get("auto_fuel_on_pit", False))
-            if entered_stall and auto_fuel_enabled and fuel_to_add is not None:
-                tmpl = self._apply_plan_template()
+            macro_enabled = bool(macro_cfg.get("enabled", False))
+            if entered_stall and auto_fuel_enabled and macro_enabled and fuel_to_add is not None:
                 fuel_add_val = max(0.0, float(fuel_to_add))
-                ctx = _SafeFormatDict(
-                    {
-                        "fuel_add": fuel_add_val,
-                        "offset_laps": 0,
-                        "pit_loss_s": 0.0,
-                        "plan_mode": str(self.config_data["fuel"].get("plan_mode", "safe")),
-                        "success_pct": 0,
-                    }
+                self._dispatch_fuel_macro(
+                    fuel_add_val,
+                    offset_laps=0,
+                    pit_loss_s=0.0,
+                    success_pct=0,
                 )
-                try:
-                    cmd = str(tmpl).format_map(ctx)
-                except Exception:
-                    cmd = f"#fuel {fuel_add_val:.2f}"
-                self.injector.send(cmd)
 
             # wetness brain
             now = time.time()
