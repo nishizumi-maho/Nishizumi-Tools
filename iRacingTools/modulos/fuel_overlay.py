@@ -1709,30 +1709,81 @@ class FuelOverlayApp(ctk.CTk):
         track = "pista_desconhecida"
         car = "carro_desconhecido"
 
-        try:
-            w = session_info.get("WeekendInfo", {}) if session_info else {}
-            t_disp = w.get("TrackDisplayName") or w.get("TrackDisplayShortName") or w.get("TrackName")
-            t_cfg = w.get("TrackConfigName") or w.get("TrackVariation")
+        def _pick_track(data: Optional[Dict[str, Any]]):
+            nonlocal track
+            if not isinstance(data, dict):
+                return
+
+            t_disp = data.get("TrackDisplayName") or data.get("TrackDisplayShortName") or data.get("TrackName")
+            t_cfg = data.get("TrackConfigName") or data.get("TrackVariation")
             pieces = [p for p in [t_disp, t_cfg] if p]
             if pieces:
                 track = " - ".join(self._sanitize_profile_piece(str(p)) for p in pieces)
+
+        def _pick_car(data: Optional[Dict[str, Any]]):
+            nonlocal car
+            if not isinstance(data, dict):
+                return
+
+            try:
+                player_idx = data.get("DriverCarIdx")
+                if player_idx is None:
+                    player_idx = self._safe_get("DriverCarIdx")
+            except Exception:
+                player_idx = None
+
+            try:
+                drivers = data.get("Drivers") or []
+            except Exception:
+                drivers = []
+
+            # fall back to high-level fields first
+            car_name = data.get("DriverCarScreenName") or data.get("DriverCarModel") or car
+
+            for drv in drivers:
+                try:
+                    idx = drv.get("CarIdx")
+                except Exception:
+                    idx = None
+
+                is_player = False
+                try:
+                    is_player = bool(drv.get("IsPlayerCar"))
+                except Exception:
+                    pass
+
+                if player_idx is not None and idx is not None and int(idx) == int(player_idx):
+                    is_player = True
+
+                if is_player:
+                    car_name = drv.get("CarScreenName") or drv.get("CarModel") or car_name
+                    break
+
+            car = self._sanitize_profile_piece(str(car_name))
+
+        # Prefer detailed session_info when available
+        try:
+            _pick_track(session_info.get("WeekendInfo", {}) if session_info else {})
         except Exception:
             pass
 
         try:
-            d = session_info.get("DriverInfo", {}) if session_info else {}
-            car = d.get("DriverCarScreenName") or d.get("DriverCarModel") or car
-            drivers = d.get("Drivers") or []
-            for drv in drivers:
-                try:
-                    if bool(drv.get("IsPlayerCar")):
-                        car = drv.get("CarScreenName") or drv.get("CarModel") or car
-                        break
-                except Exception:
-                    continue
-            car = self._sanitize_profile_piece(str(car))
+            _pick_car(session_info.get("DriverInfo", {}) if session_info else {})
         except Exception:
             pass
+
+        # Fallback to live telemetry dictionaries if session_info was missing/empty
+        if track == "pista_desconhecida":
+            try:
+                _pick_track(self._safe_get("WeekendInfo"))
+            except Exception:
+                pass
+
+        if car == "carro_desconhecido":
+            try:
+                _pick_car(self._safe_get("DriverInfo"))
+            except Exception:
+                pass
 
         return f"{car} @ {track}"
 
