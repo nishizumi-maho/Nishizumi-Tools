@@ -2789,18 +2789,16 @@ class FuelOverlayApp(ctk.CTk):
                     finish_leftover = fuel + fuel_to_add - fuel_need_total
 
             # Auto fuel: ao entrar no pit stall, manda macro com fuel_to_add
-            if (
-                entered_stall
-                and self.config_data.get("macro", {}).get("enabled", False)
-                and self.config_data.get("macro", {}).get("auto_fuel_on_pit", False)
-                and fuel_to_add is not None
-            ):
-                tmpl = self.config_data.get("macro", {}).get("templates", {}).get(
+            macro_cfg = self.config_data.get("macro", {})
+            auto_fuel_enabled = bool(macro_cfg.get("auto_fuel_on_pit", False))
+            if entered_stall and auto_fuel_enabled and fuel_to_add is not None:
+                tmpl = macro_cfg.get("templates", {}).get(
                     "apply_plan", "#fuel {fuel_add:.2f}"
                 )
+                fuel_add_val = max(0.0, float(fuel_to_add))
                 ctx = _SafeFormatDict(
                     {
-                        "fuel_add": float(fuel_to_add),
+                        "fuel_add": fuel_add_val,
                         "offset_laps": 0,
                         "pit_loss_s": 0.0,
                         "plan_mode": str(self.config_data["fuel"].get("plan_mode", "safe")),
@@ -2810,7 +2808,7 @@ class FuelOverlayApp(ctk.CTk):
                 try:
                     cmd = str(tmpl).format_map(ctx)
                 except Exception:
-                    cmd = f"#fuel {float(fuel_to_add):.2f}"
+                    cmd = f"#fuel {fuel_add_val:.2f}"
                 self.injector.send(cmd)
 
             # wetness brain
