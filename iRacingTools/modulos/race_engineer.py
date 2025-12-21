@@ -61,6 +61,14 @@ class RaceEngineer:
     - Consumo por volta suavizado com janela (rolling average) para evitar falso positivo/negativo.
     - Gatilho mais confiável: dispara ao cruzar o ponto (ponto_aviso) e respeita cooldown.
     - Suporte a múltiplos sons configuráveis via JSON e/ou dicionário.
+
+    Campos de telemetria do SDK usados no loop principal (nomes/idênticos ao Appendix A):
+    - ``FuelLevel`` (litros, float) e ``Lap``: base para estimar consumo médio por volta.
+    - ``CarIdxLapDistPct`` (%, float) e ``PlayerCarIdx``: percentual percorrido na volta do carro do jogador.
+    - ``OnPitRoad`` (bool): ignora leituras enquanto o carro está entre os cones.
+    Esses nomes/unidades vêm diretamente da documentação oficial, facilitando a
+    comparação com a lista de variáveis do SDK quando for necessário depurar
+    leituras ou expandir o cálculo.
     """
 
     DEFAULT_CONFIG: Dict[str, Any] = {
