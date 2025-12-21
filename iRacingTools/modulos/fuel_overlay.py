@@ -1438,6 +1438,8 @@ class FuelOverlayApp(ctk.CTk):
         "full": "Fill to full tank",
     }
 
+    DEFAULT_APPLY_MACRO = "#fuel {fuel_add:.2f}$"
+
     def __init__(self, *, portable: bool = False):
         super().__init__()
 
@@ -1487,6 +1489,7 @@ class FuelOverlayApp(ctk.CTk):
 
         # drag
         self._drag_offset: Optional[Tuple[int, int]] = None
+        self._drag_target = None
         self._drag_enabled: bool = bool(self.config_data["ui"].get("drag_enabled", True))
 
         self.bind("<ButtonPress-1>", self._on_mouse_down)
@@ -1572,7 +1575,7 @@ class FuelOverlayApp(ctk.CTk):
                 "debounce_ms": 250,
                 "auto_fuel_on_pit": False,  # <--- NOVO
                 "templates": {
-                    "apply_plan": "#fuel {fuel_add:.2f}",
+                    "apply_plan": DEFAULT_APPLY_MACRO,
                     "wet_preset": "",
                     "slick_preset": "",
                 },
@@ -1693,6 +1696,25 @@ class FuelOverlayApp(ctk.CTk):
             iracing_window_substring=str(m.get("iracing_window_substring", "iracing")),
             debounce_ms=int(m.get("debounce_ms", 250)),
         )
+
+    def _apply_plan_template(self) -> str:
+        """Return the chat template used to apply fuel plans.
+
+        Always enforces a trailing "$" so the command is executed
+        imediatamente ao enviar.
+        """
+
+        macro_cfg = self.config_data.get("macro", {})
+        tmpl = (
+            macro_cfg.get("templates", {}).get("apply_plan")
+            if isinstance(macro_cfg.get("templates"), dict)
+            else None
+        )
+        if not tmpl:
+            tmpl = self.DEFAULT_APPLY_MACRO
+        if not str(tmpl).endswith("$"):
+            tmpl = str(tmpl) + "$"
+        return str(tmpl)
 
     # ----------------------------
     # UI build
@@ -2173,11 +2195,16 @@ class FuelOverlayApp(ctk.CTk):
 
         row_tank = ctk.CTkFrame(sf, fg_color="transparent")
         row_tank.pack(fill="x", pady=2)
-        ctk.CTkLabel(row_tank, text="Tank capacity:", width=120, anchor="w").pack(side="left")
-        self.entry_tank = ctk.CTkEntry(row_tank, width=80)
+        ctk.CTkLabel(row_tank, text="Tank capacity (telemetry):", width=160, anchor="w").pack(side="left")
+        self.entry_tank = ctk.CTkEntry(row_tank, width=120, state="disabled")
         tank_cap = self.config_data["fuel"].get("tank_capacity")
-        self.entry_tank.insert(0, "" if tank_cap is None else str(tank_cap))
+        try:
+            self.entry_tank.configure(state="normal")
+            self.entry_tank.insert(0, "" if tank_cap is None else str(tank_cap))
+        finally:
+            self.entry_tank.configure(state="disabled")
         self.entry_tank.pack(side="left")
+        ctk.CTkLabel(row_tank, text="(LITROS)", text_color="#b0b0b0").pack(side="left", padx=(8, 0))
 
         # -------- Pit model settings
         ctk.CTkLabel(sf, text="Pit Time Model", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
@@ -2243,12 +2270,11 @@ class FuelOverlayApp(ctk.CTk):
         )
         ctk.CTkCheckBox(
             sf,
-            text="Auto fuel on pit entry (use apply template)",
+            text="Auto fuel on pit entry",
             variable=self.var_macro_auto_fuel,
         ).pack(anchor="w")
 
         self.entry_chatkey = self._settings_entry(sf, "Chat key:", self.config_data["macro"].get("chat_key", "t"), width=120)
-        self.entry_apply_tmpl = self._settings_entry(sf, "Apply plan template:", self.config_data["macro"].get("templates", {}).get("apply_plan", "#fuel {fuel_add:.2f}"), width=320)
 
         # -------- Buttons
         btns = ctk.CTkFrame(sf, fg_color="transparent")
@@ -2447,14 +2473,6 @@ class FuelOverlayApp(ctk.CTk):
             self.config_data["fuel"]["stint_target_laps"] = float(self.entry_stint.get())
         except Exception:
             pass
-        try:
-            t = str(self.entry_tank.get()).strip()
-            if t:
-                self.config_data["fuel"]["tank_capacity"] = float(self.entry_tank.get())
-            else:
-                self.config_data["fuel"]["tank_capacity"] = None
-        except Exception:
-            pass
 
         # Pit
         try:
@@ -2492,8 +2510,6 @@ class FuelOverlayApp(ctk.CTk):
         self.config_data["macro"]["enabled"] = bool(self.var_macro_enabled.get())
         self.config_data["macro"]["chat_key"] = str(self.entry_chatkey.get() or "t")
         self.config_data["macro"]["auto_fuel_on_pit"] = bool(self.var_macro_auto_fuel.get())
-        self.config_data["macro"].setdefault("templates", {})
-        self.config_data["macro"]["templates"]["apply_plan"] = str(self.entry_apply_tmpl.get() or "#fuel {fuel_add:.2f}")
 
     def _apply_config_runtime(self) -> None:
         # window flags
@@ -2584,21 +2600,38 @@ class FuelOverlayApp(ctk.CTk):
     def _on_mouse_down(self, event) -> None:
         if not self._drag_enabled:
             return
-        self._drag_offset = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+        try:
+            self._drag_target = event.widget.winfo_toplevel()
+        except Exception:
+            self._drag_target = None
+            return
+
+        try:
+            base_x = self._drag_target.winfo_x()
+            base_y = self._drag_target.winfo_y()
+            self._drag_offset = (event.x_root - base_x, event.y_root - base_y)
+        except Exception:
+            self._drag_target = None
+            self._drag_offset = None
 
     def _on_mouse_drag(self, event) -> None:
-        if not self._drag_enabled or not self._drag_offset:
+        if not self._drag_enabled or not self._drag_offset or self._drag_target is None:
             return
         x_off, y_off = self._drag_offset
         x = event.x_root - x_off
         y = event.y_root - y_off
-        self.geometry(f"+{x}+{y}")
+        try:
+            self._drag_target.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
 
     def _on_mouse_up(self, event) -> None:
         if not self._drag_enabled:
             return
         self._drag_offset = None
-        self._save_config()
+        if self._drag_target is self:
+            self._save_config()
+        self._drag_target = None
 
     # ----------------------------
     # Hotkeys
@@ -2639,7 +2672,7 @@ class FuelOverlayApp(ctk.CTk):
             if opt.fuel_add is None:
                 return
 
-            tmpl = self.config_data.get("macro", {}).get("templates", {}).get("apply_plan", "#fuel {fuel_add:.2f}")
+            tmpl = self._apply_plan_template()
             ctx = _SafeFormatDict(
                 {
                     "fuel_add": float(opt.fuel_add),
@@ -3058,9 +3091,7 @@ class FuelOverlayApp(ctk.CTk):
             macro_cfg = self.config_data.get("macro", {})
             auto_fuel_enabled = bool(macro_cfg.get("auto_fuel_on_pit", False))
             if entered_stall and auto_fuel_enabled and fuel_to_add is not None:
-                tmpl = macro_cfg.get("templates", {}).get(
-                    "apply_plan", "#fuel {fuel_add:.2f}"
-                )
+                tmpl = self._apply_plan_template()
                 fuel_add_val = max(0.0, float(fuel_to_add))
                 ctx = _SafeFormatDict(
                     {
