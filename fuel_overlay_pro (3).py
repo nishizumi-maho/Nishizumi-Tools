@@ -1436,6 +1436,10 @@ class FuelOverlayApp(ctk.CTk):
         # macros
         self.injector = self._build_injector_from_config()
 
+        # detached overlay windows (per section)
+        self.detached_windows: Dict[str, ctk.CTkToplevel] = {}
+        self.section_defs: Dict[str, Dict[str, Any]] = {}
+
         # hotkey handles
         self._hk_ids: List[int] = []
 
@@ -1759,31 +1763,49 @@ class FuelOverlayApp(ctk.CTk):
         self.section_container.pack(fill="both", expand=True, padx=6, pady=(6, 6))
 
         # Fuel/Race
-        self.sec_fuel = self._mk_section(self.section_container, "FUEL & RACE")
-        self.lbl_fuel = ctk.CTkLabel(self.sec_fuel, text="Fuel: --", anchor="w", font=("Consolas", 12, "bold"))
+        self.var_fuel = ctk.StringVar(value="Fuel: --")
+        self.var_race = ctk.StringVar(value="Race: --")
+
+        self.sec_fuel = self._mk_section(self.section_container, "FUEL & RACE", "fuel")
+        self.lbl_fuel = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_fuel, anchor="w", font=("Consolas", 12, "bold"))
         self.lbl_fuel.pack(fill="x", padx=8, pady=(6, 0))
-        self.lbl_race = ctk.CTkLabel(self.sec_fuel, text="Race: --", anchor="w", font=("Consolas", 11))
+        self._register_section_label("fuel", self.var_fuel, ("Consolas", 12, "bold"), padx=8, pady=(6, 0))
+
+        self.lbl_race = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_race, anchor="w", font=("Consolas", 11))
         self.lbl_race.pack(fill="x", padx=8, pady=(0, 6))
+        self._register_section_label("fuel", self.var_race, ("Consolas", 11), padx=8, pady=(0, 6))
 
         # Pit
-        self.sec_pit = self._mk_section(self.section_container, "PIT WINDOW (heuristic)")
-        self.lbl_pit = ctk.CTkLabel(self.sec_pit, text="Pit: --", anchor="w", font=("Consolas", 11), justify="left")
+        self.var_pit = ctk.StringVar(value="Pit: --")
+
+        self.sec_pit = self._mk_section(self.section_container, "PIT WINDOW (heuristic)", "pit")
+        self.lbl_pit = ctk.CTkLabel(self.sec_pit, textvariable=self.var_pit, anchor="w", font=("Consolas", 11), justify="left")
         self.lbl_pit.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("pit", self.var_pit, ("Consolas", 11), padx=8, pady=(6, 6), justify="left")
 
         # Weather
-        self.sec_weather = self._mk_section(self.section_container, "WEATHER / TIRES (heuristic)")
-        self.lbl_weather = ctk.CTkLabel(self.sec_weather, text="Weather: --", anchor="w", font=("Consolas", 11))
+        self.var_weather = ctk.StringVar(value="Weather: --")
+
+        self.sec_weather = self._mk_section(self.section_container, "WEATHER / TIRES (heuristic)", "weather")
+        self.lbl_weather = ctk.CTkLabel(self.sec_weather, textvariable=self.var_weather, anchor="w", font=("Consolas", 11))
         self.lbl_weather.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("weather", self.var_weather, ("Consolas", 11), padx=8, pady=(6, 6))
 
         # Risk
-        self.sec_risk = self._mk_section(self.section_container, "RISK RADAR (heuristic)")
-        self.lbl_risk = ctk.CTkLabel(self.sec_risk, text="Risk: --", anchor="w", font=("Consolas", 11))
+        self.var_risk = ctk.StringVar(value="Risk: --")
+
+        self.sec_risk = self._mk_section(self.section_container, "RISK RADAR (heuristic)", "risk")
+        self.lbl_risk = ctk.CTkLabel(self.sec_risk, textvariable=self.var_risk, anchor="w", font=("Consolas", 11))
         self.lbl_risk.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("risk", self.var_risk, ("Consolas", 11), padx=8, pady=(6, 6))
 
         # Hotkeys line
-        self.sec_hotkeys = self._mk_section(self.section_container, "HOTKEYS")
-        self.lbl_hotkeys = ctk.CTkLabel(self.sec_hotkeys, text="Hotkeys: --", anchor="w", font=("Consolas", 10))
+        self.var_hotkeys = ctk.StringVar(value="Hotkeys: --")
+
+        self.sec_hotkeys = self._mk_section(self.section_container, "HOTKEYS", "hotkeys")
+        self.lbl_hotkeys = ctk.CTkLabel(self.sec_hotkeys, textvariable=self.var_hotkeys, anchor="w", font=("Consolas", 10))
         self.lbl_hotkeys.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("hotkeys", self.var_hotkeys, ("Consolas", 10), padx=8, pady=(6, 6))
 
         self._apply_section_visibility()
 
@@ -1883,13 +1905,96 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             pass
 
-    def _mk_section(self, parent, title: str):
+    def _mk_section(self, parent, title: str, key: str):
         sec = ctk.CTkFrame(parent, corner_radius=10)
         sec.pack(fill="x", pady=(0, 10))
         hdr = ctk.CTkFrame(sec, fg_color="transparent")
         hdr.pack(fill="x", padx=8, pady=(6, 0))
         ctk.CTkLabel(hdr, text=title, font=("Segoe UI", 11, "bold"), anchor="w").pack(side="left")
+        ctk.CTkButton(hdr, text="Detach", width=64, command=lambda k=key: self._detach_section(k)).pack(side="right")
+        self.section_defs[key] = {"title": title, "labels": []}
         return sec
+
+    def _register_section_label(
+        self,
+        key: str,
+        var: ctk.StringVar,
+        font: Tuple[str, int, str] | Tuple[str, int],
+        *,
+        padx: int = 0,
+        pady: Tuple[int, int] | int = 0,
+        anchor: str = "w",
+        justify: str = "center",
+    ) -> None:
+        try:
+            meta = self.section_defs.setdefault(key, {"title": key, "labels": []})
+            meta.setdefault("labels", []).append(
+                {
+                    "var": var,
+                    "font": font,
+                    "padx": padx,
+                    "pady": pady,
+                    "anchor": anchor,
+                    "justify": justify,
+                }
+            )
+        except Exception:
+            pass
+
+    def _apply_detached_window_flags(self, win: ctk.CTkToplevel) -> None:
+        try:
+            win.attributes("-topmost", bool(self.config_data["ui"].get("always_on_top", True)))
+        except Exception:
+            pass
+        try:
+            win.overrideredirect(bool(self.config_data["ui"].get("borderless", True)))
+        except Exception:
+            pass
+
+    def _detach_section(self, key: str) -> None:
+        meta = self.section_defs.get(key)
+        if not meta:
+            return
+
+        try:
+            existing = self.detached_windows.get(key)
+            if existing is not None and existing.winfo_exists():
+                existing.deiconify()
+                existing.lift()
+                return
+        except Exception:
+            pass
+
+        win = ctk.CTkToplevel(self)
+        win.title(meta.get("title", key))
+        self._apply_detached_window_flags(win)
+
+        frame = ctk.CTkFrame(win, corner_radius=10)
+        frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+        for lbl in meta.get("labels", []):
+            try:
+                ctk.CTkLabel(
+                    frame,
+                    textvariable=lbl.get("var"),
+                    font=lbl.get("font"),
+                    anchor=lbl.get("anchor", "w"),
+                    justify=lbl.get("justify", "center"),
+                ).pack(fill="x", padx=lbl.get("padx", 0), pady=lbl.get("pady", 0))
+            except Exception:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", lambda k=key: self._close_detached(k))
+        self.detached_windows[key] = win
+
+    def _close_detached(self, key: str) -> None:
+        try:
+            win = self.detached_windows.get(key)
+            if win is not None:
+                win.destroy()
+        except Exception:
+            pass
+        self.detached_windows.pop(key, None)
 
     def _build_settings_tab(self) -> None:
         sf = ctk.CTkScrollableFrame(self.tab_settings)
@@ -2289,6 +2394,12 @@ class FuelOverlayApp(ctk.CTk):
             self.var_ignore_settings.set(bool(self.config_data["fuel"].get("ignore_yellow", True)))
         except Exception:
             pass
+
+        for win in list(self.detached_windows.values()):
+            try:
+                self._apply_detached_window_flags(win)
+            except Exception:
+                pass
 
         # macros / hotkeys
         self.injector = self._build_injector_from_config()
@@ -2766,33 +2877,31 @@ class FuelOverlayApp(ctk.CTk):
             if burn is None or burn <= 0 or laps_possible is None:
                 proj = self.history.projected_burn()
                 proj_s = "" if proj is None else f" (proj {proj:.3f}/lap)"
-                self.lbl_fuel.configure(text=f"Burn: collecting{proj_s} | Fuel: {fuel:.2f}")
-                self.lbl_race.configure(text="Race: RemLaps=-- | Need=-- | Add=--")
+                self.var_fuel.set(f"Burn: collecting{proj_s} | Fuel: {fuel:.2f}")
+                self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
             else:
-                self.lbl_fuel.configure(text=f"Burn: {burn:.3f}/lap | Fuel: {fuel:.2f} | Can: {laps_possible:.1f} laps")
+                self.var_fuel.set(f"Burn: {burn:.3f}/lap | Fuel: {fuel:.2f} | Can: {laps_possible:.1f} laps")
                 if fuel_need_total is not None and fuel_to_add is not None:
                     rem_s = "--" if laps_remain is None else f"{laps_remain:.1f}"
                     left_s = "--" if finish_leftover is None else f"{finish_leftover:.2f}"
                     plan_s = (fuel_plan_mode or "finish").upper()
-                    self.lbl_race.configure(
-                        text=f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={fuel_need_total:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
+                    self.var_race.set(
+                        f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={fuel_need_total:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
                     )
                 else:
-                    self.lbl_race.configure(text="Race: RemLaps=-- | Need=-- | Add=--")
+                    self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
 
-            self.lbl_weather.configure(text=self._format_weather_line(track_temp, declared_wet, wet_action, wet_conf, wet_details))
-            self.lbl_risk.configure(text=f"Risk: {risk_score:3d} | {risk_reason}")
+            self.var_weather.set(self._format_weather_line(track_temp, declared_wet, wet_action, wet_conf, wet_details))
+            self.var_risk.set(f"Risk: {risk_score:3d} | {risk_reason}")
 
-            self.lbl_pit.configure(text=self._format_pit_options(opts, pit_base, fill_rate, tire_time))
+            self.var_pit.set(self._format_pit_options(opts, pit_base, fill_rate, tire_time))
 
             hk = self.config_data.get("hotkeys", {})
-            self.lbl_hotkeys.configure(
-                text=(
-                    f"Margin +/-: {hk.get('margin_up','?')} / {hk.get('margin_down','?')} | "
-                    f"Plan: {hk.get('cycle_plan','?')} | "
-                    f"Apply: {hk.get('apply_opt1','?')},{hk.get('apply_opt2','?')},{hk.get('apply_opt3','?')} | "
-                    f"Settings: {hk.get('toggle_settings','?')}"
-                )
+            self.var_hotkeys.set(
+                f"Margin +/-: {hk.get('margin_up','?')} / {hk.get('margin_down','?')} | "
+                f"Plan: {hk.get('cycle_plan','?')} | "
+                f"Apply: {hk.get('apply_opt1','?')},{hk.get('apply_opt2','?')},{hk.get('apply_opt3','?')} | "
+                f"Settings: {hk.get('toggle_settings','?')}"
             )
 
             # cache for templates
@@ -2969,6 +3078,12 @@ class FuelOverlayApp(ctk.CTk):
     def _close(self) -> None:
         self._save_config()
         self._remove_hotkeys()
+        for win in list(self.detached_windows.values()):
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        self.detached_windows.clear()
         try:
             self.destroy()
         except Exception:
