@@ -17,6 +17,15 @@ Principais melhorias:
   - Pit Exit / Merge warning
   - Carro muito lento à frente (mesmo ON TRACK)
   - Pass request opcional também para mesma classe (configurável)
+
+Campos do SDK consultados (nomes idênticos ao Appendix A):
+- ``IsReplayPlaying``: evita processar gatilhos quando estamos em replay/menus.
+- ``PlayerCarIdx`` + ``CarIdxLapDistPct``: calculam posição percentual do jogador e dos demais carros.
+- ``CarIdxSpeed`` e ``Speed``: estimam gap/closing rate via velocidades em m/s.
+- ``PlayerCarOnPitRoad``: pausa regras enquanto o carro está entre os cones.
+- ``CarIdxTrackSurface``: identifica off-track para alertas de perigo.
+Documentar explicitamente esses campos ajuda quem consultar a lista de variáveis do
+SDK a entender as dependências do módulo sem ter de caçar os nomes no código.
 """
 
 from __future__ import annotations
