@@ -1,20 +1,18 @@
 """pit_strategy.py
 
-Turbo pit macro + generic chat command sender for iRacing.
+Turbo pit macro for iRacing (SDK-first, chat fallback).
 
 What this module provides
 - Hotkey (keyboard) or joystick button (pygame) to run a pit "turbo" command.
-- Generic function to send ANY pit/chat scripting command quickly.
-- Two injection modes:
+- Prefers SDK broadcast pit commands; falls back to chat macros when the SDK
+  is unavailable or a command fails.
+- Generic function to send ANY pit/chat scripting command quickly (kept for
+  compatibility with existing UIs).
+- Two injection modes when using chat:
     - "type"     (default): keyboard.write() very fast, no clipboard.
     - "clipboard": copies to clipboard and Ctrl+V (sometimes more reliable for very long strings).
 - Optional safety guard to avoid typing into the wrong app:
     - require_iracing_foreground = True
-
-Why it's still chat-based
-- iRacing *does* have SDK/broadcast ways to change pit settings, but they vary by
-  language binding and require extra wiring. This module focuses on the robust
-  option that works for everyone: chat macros.
 
 Project structure compatibility
 - Many projects use: <root>/modulos/pit_strategy.py and <root>/configs/pit_config.json
@@ -41,6 +39,11 @@ try:
     import pygame
 except Exception:
     pygame = None
+
+try:
+    import irsdk  # type: ignore
+except Exception:
+    irsdk = None
 
 
 # ==========================
@@ -118,6 +121,8 @@ class PitStrategyManager:
         self.pneus_ativos: bool = True
         self.main_app = main_app_ref
 
+        self.ir = None  # lazy irsdk handle
+
         self._lock = threading.RLock()
         self._last_trigger_ts = 0.0
 
@@ -135,6 +140,7 @@ class PitStrategyManager:
             "cmd_when_on": "#-cleartires #ws",
             "cmd_when_off": "#cleartires #-ws",
             "enable_pygame": False,
+            "prefer_sdk": True,
         }
 
         self.load_config()
@@ -173,6 +179,8 @@ class PitStrategyManager:
 
         if "enable_pygame" not in self.config:
             self.config["enable_pygame"] = False
+        if "prefer_sdk" not in self.config:
+            self.config["prefer_sdk"] = True
 
     def save_config(self) -> None:
         _ensure_dirs()
@@ -190,6 +198,127 @@ class PitStrategyManager:
         title = _get_foreground_window_title().lower()
         needle = str(self.config.get("iracing_window_substring", "iracing") or "iracing").lower()
         return needle in title
+
+    # ---------- iRacing SDK ----------
+
+    def _ensure_sdk(self) -> bool:
+        if not bool(self.config.get("prefer_sdk", True)):
+            return False
+        if irsdk is None:
+            return False
+
+        try:
+            if self.ir is None:
+                self.ir = irsdk.IRSDK()
+
+            if hasattr(self.ir, "is_initialized") and not bool(getattr(self.ir, "is_initialized")):
+                self.ir.startup()
+            elif hasattr(self.ir, "is_connected") and callable(getattr(self.ir, "is_connected")):
+                if not bool(self.ir.is_connected()):
+                    self.ir.startup()
+            elif hasattr(self.ir, "startup"):
+                self.ir.startup()
+
+            connected = False
+            if hasattr(self.ir, "is_initialized"):
+                connected = connected or bool(getattr(self.ir, "is_initialized"))
+            if hasattr(self.ir, "is_connected") and callable(getattr(self.ir, "is_connected")):
+                connected = connected or bool(self.ir.is_connected())
+            return connected
+        except Exception:
+            self.ir = None
+            return False
+
+    def _get_irsdk_constant(self, candidates):
+        if irsdk is None:
+            return None
+        for name in candidates:
+            if not name:
+                continue
+            val = getattr(irsdk, name, None)
+            if val is not None:
+                return val
+
+        enum = getattr(irsdk, "BroadcastMsgTypes", None)
+        if enum is not None:
+            for name in candidates:
+                try:
+                    val = getattr(enum, name, None)
+                    if val is not None:
+                        return val
+                except Exception:
+                    continue
+        return None
+
+    def _broadcast(self, msg, param1=0, param2=0) -> bool:
+        if self.ir is None:
+            return False
+        for meth in ("broadcast", "broadcastMsg", "broadcast_msg"):
+            fn = getattr(self.ir, meth, None)
+            if callable(fn):
+                try:
+                    fn(msg, param1, param2)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    def _sdk_pit_command(self, cmd: str, param: int = 0) -> bool:
+        if not self._ensure_sdk():
+            return False
+
+        msg = self._get_irsdk_constant([
+            "BROADCASTMSG_PIT_COMMAND",
+            "PitCommand",
+            "PitCommand.value" if hasattr(irsdk, "BroadcastMsgTypes") else None,
+        ])
+        pit_const = self._get_irsdk_constant(
+            [
+                f"PITCOMMAND_{cmd.upper()}",
+                f"PIT_COMMAND_{cmd.upper()}",
+                f"irsdk_PitCommand_{cmd.capitalize()}",
+                f"PitCommand_{cmd.capitalize()}",
+            ]
+        )
+
+        if msg is None or pit_const is None:
+            return False
+
+        if hasattr(self.ir, "pit_command") and callable(getattr(self.ir, "pit_command")):
+            try:
+                self.ir.pit_command(pit_const, int(param))
+                return True
+            except Exception:
+                pass
+
+        if hasattr(self.ir, "pitCommand") and callable(getattr(self.ir, "pitCommand")):
+            try:
+                self.ir.pitCommand(pit_const, int(param))
+                return True
+            except Exception:
+                pass
+
+        return self._broadcast(msg, int(pit_const), int(param))
+
+    def _toggle_tires_sdk(self, enabled: bool) -> bool:
+        """Attempt to toggle tires via SDK broadcast.
+
+        Falls back to chat when SDK is missing or all calls fail.
+        """
+
+        cmds_on = ("LF", "RF", "LR", "RR")
+        ok = False
+
+        if enabled:
+            # Ensure tires are set, then request windshield tear-off.
+            for c in cmds_on:
+                ok = self._sdk_pit_command(c, 1) or ok
+            ok = self._sdk_pit_command("WS", 1) or ok
+        else:
+            ok = self._sdk_pit_command("CLEARTIRES", 0)
+            ok = self._sdk_pit_command("WS", 0) or ok
+
+        return ok
 
     # ---------- injection ----------
 
@@ -255,7 +384,13 @@ class PitStrategyManager:
         cmd_off = str(self.config.get("cmd_when_off", "#cleartires #-ws") or "#cleartires #-ws")
         cmd = cmd_on if self.pneus_ativos else cmd_off
 
-        print(f">> PIT COMANDO: {cmd}")
+        # Prefer SDK commands; fallback to chat macro
+        sdk_ok = self._toggle_tires_sdk(self.pneus_ativos)
+        if sdk_ok:
+            print(f">> PIT COMANDO SDK: {'TROCAR PNEUS' if self.pneus_ativos else 'NAO TROCAR PNEUS'}")
+            return
+
+        print(f">> PIT COMANDO CHAT: {cmd}")
         self.send_chat_command(cmd)
 
     # ---------- listeners ----------
