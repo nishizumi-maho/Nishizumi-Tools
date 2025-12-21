@@ -1678,14 +1678,86 @@ class FuelOverlayApp(ctk.CTk):
         self.tabs.pack(fill="both", expand=True)
 
         self.tab_overlay = self.tabs.add("Overlay")
+        self.tab_controls = self.tabs.add("Painel")
         self.tab_settings = self.tabs.add("Settings")
 
         self._build_overlay_tab()
+        self._build_controls_tab()
         self._build_settings_tab()
 
     def _build_overlay_tab(self) -> None:
+        # Sections container (scrollable)
+        # If the window is short, we still want access to all sections below.
+        # Some CustomTkinter versions don't expose scrollbar color kwargs.
+        # We fall back gracefully if that's the case.
+        try:
+            self.section_container = ctk.CTkScrollableFrame(
+                self.tab_overlay,
+                fg_color="transparent",
+                scrollbar_button_color=("#3f3f3f", "#3f3f3f"),
+                scrollbar_button_hover_color=("#525252", "#525252"),
+            )
+        except TypeError:
+            self.section_container = ctk.CTkScrollableFrame(
+                self.tab_overlay,
+                fg_color="transparent",
+            )
+        self.section_container.pack(fill="both", expand=True, padx=0, pady=0)
+
+        # Fuel/Race
+        self.var_fuel = ctk.StringVar(value="Fuel: --")
+        self.var_race = ctk.StringVar(value="Race: --")
+
+        self.sec_fuel = self._mk_section(self.section_container, "FUEL & RACE", "fuel")
+        self.lbl_fuel = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_fuel, anchor="w", font=("Consolas", 12, "bold"))
+        self.lbl_fuel.pack(fill="x", padx=8, pady=(6, 0))
+        self._register_section_label("fuel", self.var_fuel, ("Consolas", 12, "bold"), padx=8, pady=(6, 0))
+
+        self.lbl_race = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_race, anchor="w", font=("Consolas", 11))
+        self.lbl_race.pack(fill="x", padx=8, pady=(0, 6))
+        self._register_section_label("fuel", self.var_race, ("Consolas", 11), padx=8, pady=(0, 6))
+
+        # Pit
+        self.var_pit = ctk.StringVar(value="Pit: --")
+
+        self.sec_pit = self._mk_section(self.section_container, "PIT WINDOW (heuristic)", "pit")
+        self.lbl_pit = ctk.CTkLabel(self.sec_pit, textvariable=self.var_pit, anchor="w", font=("Consolas", 11), justify="left")
+        self.lbl_pit.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("pit", self.var_pit, ("Consolas", 11), padx=8, pady=(6, 6), justify="left")
+
+        # Weather
+        self.var_weather = ctk.StringVar(value="Weather: --")
+
+        self.sec_weather = self._mk_section(self.section_container, "WEATHER / TIRES (heuristic)", "weather")
+        self.lbl_weather = ctk.CTkLabel(self.sec_weather, textvariable=self.var_weather, anchor="w", font=("Consolas", 11))
+        self.lbl_weather.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("weather", self.var_weather, ("Consolas", 11), padx=8, pady=(6, 6))
+
+        # Risk
+        self.var_risk = ctk.StringVar(value="Risk: --")
+
+        self.sec_risk = self._mk_section(self.section_container, "RISK RADAR (heuristic)", "risk")
+        self.lbl_risk = ctk.CTkLabel(self.sec_risk, textvariable=self.var_risk, anchor="w", font=("Consolas", 11))
+        self.lbl_risk.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("risk", self.var_risk, ("Consolas", 11), padx=8, pady=(6, 6))
+
+        # Hotkeys line
+        self.var_hotkeys = ctk.StringVar(value="Hotkeys: --")
+
+        self.sec_hotkeys = self._mk_section(self.section_container, "HOTKEYS", "hotkeys")
+        self.lbl_hotkeys = ctk.CTkLabel(self.sec_hotkeys, textvariable=self.var_hotkeys, anchor="w", font=("Consolas", 10))
+        self.lbl_hotkeys.pack(fill="x", padx=8, pady=(6, 6))
+        self._register_section_label("hotkeys", self.var_hotkeys, ("Consolas", 10), padx=8, pady=(6, 6))
+
+        self._apply_section_visibility()
+
+        # Make mouse-wheel scrolling reliable inside the overlay tab
+        # (CTkTabview + borderless window can sometimes swallow wheel events).
+        self._setup_overlay_scroll_bindings()
+
+    def _build_controls_tab(self) -> None:
         # Top row (status + save)
-        top = ctk.CTkFrame(self.tab_overlay, fg_color="transparent")
+        top = ctk.CTkFrame(self.tab_controls, fg_color="transparent")
         top.pack(fill="x", padx=6, pady=(6, 8))
 
         title_box = ctk.CTkFrame(top, fg_color="transparent")
@@ -1718,7 +1790,7 @@ class FuelOverlayApp(ctk.CTk):
         self.btn_save.pack(side="right", padx=(0, 8))
 
         # Quick controls row
-        ctrl = ctk.CTkFrame(self.tab_overlay, fg_color="transparent")
+        ctrl = ctk.CTkFrame(self.tab_controls, fg_color="transparent")
         ctrl.pack(fill="x", padx=8, pady=(0, 8))
         ctrl.columnconfigure(0, weight=1)
         ctrl.columnconfigure(1, weight=1)
@@ -1771,77 +1843,8 @@ class FuelOverlayApp(ctk.CTk):
         self.chk_ignore.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         # Status line
-        self.lbl_status = ctk.CTkLabel(self.tab_overlay, text="iRacing: waiting…", anchor="w")
+        self.lbl_status = ctk.CTkLabel(self.tab_controls, text="iRacing: waiting…", anchor="w")
         self.lbl_status.pack(fill="x", padx=8)
-
-        # Sections container (scrollable)
-        # If the window is short, we still want access to all sections below.
-        # Some CustomTkinter versions don't expose scrollbar color kwargs.
-        # We fall back gracefully if that's the case.
-        try:
-            self.section_container = ctk.CTkScrollableFrame(
-                self.tab_overlay,
-                fg_color="transparent",
-                scrollbar_button_color=("#3f3f3f", "#3f3f3f"),
-                scrollbar_button_hover_color=("#525252", "#525252"),
-            )
-        except TypeError:
-            self.section_container = ctk.CTkScrollableFrame(
-                self.tab_overlay,
-                fg_color="transparent",
-            )
-        self.section_container.pack(fill="both", expand=True, padx=6, pady=(6, 6))
-
-        # Fuel/Race
-        self.var_fuel = ctk.StringVar(value="Fuel: --")
-        self.var_race = ctk.StringVar(value="Race: --")
-
-        self.sec_fuel = self._mk_section(self.section_container, "FUEL & RACE", "fuel")
-        self.lbl_fuel = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_fuel, anchor="w", font=("Consolas", 12, "bold"))
-        self.lbl_fuel.pack(fill="x", padx=8, pady=(6, 0))
-        self._register_section_label("fuel", self.var_fuel, ("Consolas", 12, "bold"), padx=8, pady=(6, 0))
-
-        self.lbl_race = ctk.CTkLabel(self.sec_fuel, textvariable=self.var_race, anchor="w", font=("Consolas", 11))
-        self.lbl_race.pack(fill="x", padx=8, pady=(0, 6))
-        self._register_section_label("fuel", self.var_race, ("Consolas", 11), padx=8, pady=(0, 6))
-
-        # Pit
-        self.var_pit = ctk.StringVar(value="Pit: --")
-
-        self.sec_pit = self._mk_section(self.section_container, "PIT WINDOW (heuristic)", "pit")
-        self.lbl_pit = ctk.CTkLabel(self.sec_pit, textvariable=self.var_pit, anchor="w", font=("Consolas", 11), justify="left")
-        self.lbl_pit.pack(fill="x", padx=8, pady=(6, 6))
-        self._register_section_label("pit", self.var_pit, ("Consolas", 11), padx=8, pady=(6, 6), justify="left")
-
-        # Weather
-        self.var_weather = ctk.StringVar(value="Weather: --")
-
-        self.sec_weather = self._mk_section(self.section_container, "WEATHER / TIRES (heuristic)", "weather")
-        self.lbl_weather = ctk.CTkLabel(self.sec_weather, textvariable=self.var_weather, anchor="w", font=("Consolas", 11))
-        self.lbl_weather.pack(fill="x", padx=8, pady=(6, 6))
-        self._register_section_label("weather", self.var_weather, ("Consolas", 11), padx=8, pady=(6, 6))
-
-        # Risk
-        self.var_risk = ctk.StringVar(value="Risk: --")
-
-        self.sec_risk = self._mk_section(self.section_container, "RISK RADAR (heuristic)", "risk")
-        self.lbl_risk = ctk.CTkLabel(self.sec_risk, textvariable=self.var_risk, anchor="w", font=("Consolas", 11))
-        self.lbl_risk.pack(fill="x", padx=8, pady=(6, 6))
-        self._register_section_label("risk", self.var_risk, ("Consolas", 11), padx=8, pady=(6, 6))
-
-        # Hotkeys line
-        self.var_hotkeys = ctk.StringVar(value="Hotkeys: --")
-
-        self.sec_hotkeys = self._mk_section(self.section_container, "HOTKEYS", "hotkeys")
-        self.lbl_hotkeys = ctk.CTkLabel(self.sec_hotkeys, textvariable=self.var_hotkeys, anchor="w", font=("Consolas", 10))
-        self.lbl_hotkeys.pack(fill="x", padx=8, pady=(6, 6))
-        self._register_section_label("hotkeys", self.var_hotkeys, ("Consolas", 10), padx=8, pady=(6, 6))
-
-        self._apply_section_visibility()
-
-        # Make mouse-wheel scrolling reliable inside the overlay tab
-        # (CTkTabview + borderless window can sometimes swallow wheel events).
-        self._setup_overlay_scroll_bindings()
 
     def _setup_overlay_scroll_bindings(self) -> None:
         """Make sure mouse wheel scrolling works reliably for the overlay section list.
