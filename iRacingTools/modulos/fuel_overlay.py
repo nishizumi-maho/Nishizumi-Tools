@@ -1453,6 +1453,7 @@ class FuelOverlayApp(ctk.CTk):
         self._last_pit_options: List[PitOption] = []
         self._prev_in_pit_stall: Optional[bool] = None
         self._session_info_cache: Optional[Dict[str, Any]] = None
+        self._auto_tank_capacity_l: Optional[float] = None
 
         # window
         self.title(APP_NAME)
@@ -2637,6 +2638,52 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             return None
 
+    def _auto_fill_tank_capacity(self, tank_capacity: Optional[float]) -> None:
+        """Populate the UI/config tank capacity from telemetry when possible.
+
+        To avoid fighting with manual user edits, only update when the entry is
+        empty or still matches the previous auto-filled value. Once the user
+        edits the entry with a different number, auto updates are suppressed.
+        """
+
+        if tank_capacity is None:
+            return
+
+        try:
+            current_text = str(self.entry_tank.get()).strip()
+        except Exception:
+            return
+
+        new_val = float(tank_capacity)
+        new_text = f"{new_val:.3f}".rstrip("0").rstrip(".")
+
+        should_update = False
+        if not current_text:
+            should_update = True
+        else:
+            try:
+                cur_val = float(current_text)
+            except Exception:
+                should_update = True
+            else:
+                if self._auto_tank_capacity_l is not None and abs(cur_val - self._auto_tank_capacity_l) < 1e-3:
+                    should_update = True
+
+        if not should_update:
+            return
+
+        self._auto_tank_capacity_l = new_val
+        try:
+            self.entry_tank.delete(0, ctk.END)
+            self.entry_tank.insert(0, new_text)
+        except Exception:
+            return
+
+        try:
+            self.config_data["fuel"]["tank_capacity"] = new_val
+        except Exception:
+            pass
+
     @staticmethod
     def _track_length_m(val: Any) -> Optional[float]:
         """Converte TrackLength do iRacing para metros.
@@ -2799,7 +2846,10 @@ class FuelOverlayApp(ctk.CTk):
                 track_len_m = self._session_track_length_m(session_info)
 
             # Tank capacity: prefer session info when available (DriverCarFuelMaxLtr/DriverCarMaxFuelPct)
-            tank_capacity = self._session_tank_capacity_l(session_info)
+            tank_capacity_session = self._session_tank_capacity_l(session_info)
+            if tank_capacity_session is not None:
+                self._auto_fill_tank_capacity(tank_capacity_session)
+            tank_capacity = tank_capacity_session
             if tank_capacity is None:
                 tank_capacity = tank_capacity_cfg
 
