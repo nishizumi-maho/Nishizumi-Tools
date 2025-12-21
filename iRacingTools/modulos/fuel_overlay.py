@@ -52,6 +52,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
+from .runtime_deps import ensure_customtkinter
+
+ensure_customtkinter()
+
 import customtkinter as ctk
 
 try:
@@ -1469,6 +1473,7 @@ class FuelOverlayApp(ctk.CTk):
         # drag
         self._drag_offset: Optional[Tuple[int, int]] = None
         self._drag_enabled: bool = bool(self.config_data["ui"].get("drag_enabled", True))
+        self._detached_drag_offsets: Dict[ctk.CTkToplevel, Optional[Tuple[int, int]]] = {}
 
         self.bind("<ButtonPress-1>", self._on_mouse_down)
         self.bind("<B1-Motion>", self._on_mouse_drag)
@@ -2010,6 +2015,7 @@ class FuelOverlayApp(ctk.CTk):
         win = ctk.CTkToplevel(self)
         win.title(meta.get("title", key))
         self._apply_detached_window_flags(win)
+        self._bind_detached_drag(win)
 
         frame = ctk.CTkFrame(win, corner_radius=10)
         frame.pack(fill="both", expand=True, padx=8, pady=8)
@@ -2034,6 +2040,7 @@ class FuelOverlayApp(ctk.CTk):
             win = self.detached_windows.get(key)
             if win is not None:
                 win.destroy()
+                self._detached_drag_offsets.pop(win, None)
         except Exception:
             pass
         self.detached_windows.pop(key, None)
@@ -2473,6 +2480,35 @@ class FuelOverlayApp(ctk.CTk):
             return
         self._drag_offset = None
         self._save_config()
+
+    def _bind_detached_drag(self, win: ctk.CTkToplevel) -> None:
+        win.bind("<ButtonPress-1>", lambda e, w=win: self._on_detached_mouse_down(w, e))
+        win.bind("<B1-Motion>", lambda e, w=win: self._on_detached_mouse_drag(w, e))
+        win.bind("<ButtonRelease-1>", lambda e, w=win: self._on_detached_mouse_up(w, e))
+
+    def _on_detached_mouse_down(self, win: ctk.CTkToplevel, event) -> None:
+        if not self._drag_enabled:
+            return
+        self._detached_drag_offsets[win] = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+    def _on_detached_mouse_drag(self, win: ctk.CTkToplevel, event) -> None:
+        if not self._drag_enabled:
+            return
+        offset = self._detached_drag_offsets.get(win)
+        if not offset:
+            return
+        x_off, y_off = offset
+        x = event.x_root - x_off
+        y = event.y_root - y_off
+        try:
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+    def _on_detached_mouse_up(self, win: ctk.CTkToplevel, event) -> None:
+        if not self._drag_enabled:
+            return
+        self._detached_drag_offsets.pop(win, None)
 
     # ----------------------------
     # Hotkeys
@@ -3254,6 +3290,7 @@ class FuelOverlayApp(ctk.CTk):
                 win.destroy()
             except Exception:
                 pass
+            self._detached_drag_offsets.pop(win, None)
         self.detached_windows.clear()
         try:
             self.destroy()

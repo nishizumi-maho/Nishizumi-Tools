@@ -1,4 +1,3 @@
-import customtkinter as ctk
 import os
 import sys
 import subprocess
@@ -7,6 +6,12 @@ import tkinter.messagebox
 from tkinter import messagebox
 import json
 import winreg # Biblioteca para mexer no Registro do Windows
+
+from modulos.runtime_deps import ensure_customtkinter
+
+ensure_customtkinter()
+
+import customtkinter as ctk
 
 # --- CONFIGURAÇÃO DE CAMINHOS ---
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -1,3 +1,7 @@
+from .runtime_deps import ensure_customtkinter
+
+ensure_customtkinter()
+
 import customtkinter as ctk
 
 # Compatibilidade: alguns projetos têm o módulo dentro de "modulos/".
