@@ -1500,7 +1500,10 @@ class FuelOverlayApp(ctk.CTk):
         self.config_dir, self.config_file = _get_config_paths(self.portable)
         self.config_data = self._load_config()
 
-        self._active_profile_key: Optional[str] = None
+        stored_profile = self.config_data.get("last_pit_profile_key")
+        self._active_profile_key: Optional[str] = (
+            str(stored_profile) if isinstance(stored_profile, str) and stored_profile.strip() else None
+        )
         self._pit_profile_has_data: bool = bool(self.config_data.get("pit", {}).get("has_calibration", False))
 
         # IRSDK
@@ -1660,6 +1663,7 @@ class FuelOverlayApp(ctk.CTk):
                 "beep_cooldown_s": 3.0,
                 "risk_beep_threshold": 85,
             },
+            "last_pit_profile_key": None,
         }
 
     def _load_config(self) -> dict:
@@ -1705,9 +1709,9 @@ class FuelOverlayApp(ctk.CTk):
                     base[k] = self._default_config()["pit_profile_defaults"].get(k)
         return dict(base)
 
-    def _profile_key_from_session(self, session_info: Optional[Dict[str, Any]]) -> str:
-        track = "pista_desconhecida"
-        car = "carro_desconhecido"
+    def _profile_key_from_session(self, session_info: Optional[Dict[str, Any]]) -> Optional[str]:
+        track: Optional[str] = None
+        car: Optional[str] = None
 
         try:
             w = session_info.get("WeekendInfo", {}) if session_info else {}
@@ -1734,7 +1738,13 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             pass
 
-        return f"{car} @ {track}"
+        if not car and not track:
+            return None
+
+        car_key = car or "carro_desconhecido"
+        track_key = track or "pista_desconhecida"
+
+        return f"{car_key} @ {track_key}"
 
     def _persist_active_profile(self) -> None:
         if not self._active_profile_key:
@@ -1750,7 +1760,16 @@ class FuelOverlayApp(ctk.CTk):
     def _maybe_switch_pit_profile(self, session_info: Optional[Dict[str, Any]]) -> None:
         profiles = self.config_data.setdefault("pit_profiles", {})
         template = self._pit_profile_template()
+        fallback_key = self.config_data.get("last_pit_profile_key")
         new_key = self._profile_key_from_session(session_info)
+
+        if not new_key:
+            if self._active_profile_key:
+                return
+            if isinstance(fallback_key, str) and fallback_key.strip():
+                new_key = fallback_key
+            else:
+                new_key = "perfil_global"
 
         if self._active_profile_key == new_key:
             return
@@ -1773,6 +1792,7 @@ class FuelOverlayApp(ctk.CTk):
         self._pit_profile_has_data = bool(self.config_data.get("pit", {}).get("has_calibration", False))
 
         self._active_profile_key = new_key
+        self.config_data["last_pit_profile_key"] = new_key
         try:
             self.pit_profile_label.set(f"Perfil ativo: {new_key} (dados salvos por carro/pista)")
         except Exception:
@@ -1831,6 +1851,7 @@ class FuelOverlayApp(ctk.CTk):
         try:
             _ensure_dir(self.config_dir)
             self._persist_active_profile()
+            self.config_data["last_pit_profile_key"] = self._active_profile_key
             try:
                 self.config_data["ui"]["geometry"] = self.geometry()
             except Exception:
