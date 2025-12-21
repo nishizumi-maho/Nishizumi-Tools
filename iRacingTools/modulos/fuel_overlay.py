@@ -1498,6 +1498,7 @@ class FuelOverlayApp(ctk.CTk):
 
         # UI
         self._build_ui()
+        self._wire_drag_bindings()
 
         # hotkeys
         self._setup_hotkeys()
@@ -2059,6 +2060,7 @@ class FuelOverlayApp(ctk.CTk):
 
         win.protocol("WM_DELETE_WINDOW", lambda k=key: self._close_detached(k))
         self.detached_windows[key] = win
+        self._wire_drag_bindings()
 
     def _close_detached(self, key: str) -> None:
         try:
@@ -2180,9 +2182,6 @@ class FuelOverlayApp(ctk.CTk):
         # -------- Pit model settings
         ctk.CTkLabel(sf, text="Pit Time Model", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
 
-        self.entry_pit_base = self._settings_entry(sf, "Base loss (s):", self.config_data["pit"].get("pit_base_loss_s", 40.0))
-        self.entry_fill_rate = self._settings_entry(sf, "Fill rate (u/s):", self.config_data["pit"].get("fuel_fill_rate", 2.5))
-        self.entry_tire_time = self._settings_entry(sf, "Tire time (s):", self.config_data["pit"].get("tire_service_time_s", 18.0))
         self.var_tires_with_fuel = ctk.BooleanVar(value=bool(self.config_data["pit"].get("tires_with_fuel", False)))
         ctk.CTkCheckBox(
             sf,
@@ -2193,40 +2192,18 @@ class FuelOverlayApp(ctk.CTk):
         self.entry_clean_air = self._settings_entry(sf, "Clean air target (s):", self.config_data["pit"].get("clean_air_target_s", 2.0))
         self.entry_offsets = self._settings_entry(sf, "Lookahead laps:", self.config_data["pit"].get("max_offsets", 3))
 
-        helper = ctk.CTkFrame(sf, fg_color="#1b1b1b")
-        helper.pack(fill="x", pady=(6, 6), padx=0)
-        ctk.CTkLabel(helper, text="Assistente de tempo de pit (para o pit window)", font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", padx=8, pady=(4, 2))
+        self.pit_model_summary = ctk.StringVar()
         ctk.CTkLabel(
-            helper,
-            text="Informe um pit lane típico (inclui entrada/saída) e o quanto costuma reabastecer."
-            " Usamos a taxa de abastecimento configurada e o tempo de pneus para sugerir a perda base.",
+            sf,
+            textvariable=self.pit_model_summary,
             anchor="w",
             wraplength=520,
             text_color="#b0b0b0",
-            font=("Segoe UI", 10),
-        ).pack(fill="x", padx=8, pady=(0, 6))
-
-        row_helper = ctk.CTkFrame(helper, fg_color="transparent")
-        row_helper.pack(fill="x", padx=8, pady=(0, 4))
-        ctk.CTkLabel(row_helper, text="Pit lane típico (s):", width=170, anchor="w").pack(side="left")
-        self.entry_helper_lane = ctk.CTkEntry(row_helper, width=90)
-        self.entry_helper_lane.insert(0, "60")
-        self.entry_helper_lane.pack(side="left")
-        ctk.CTkLabel(row_helper, text="Combustível adicionado:", width=160, anchor="w").pack(side="left", padx=(10, 0))
-        self.entry_helper_fuel = ctk.CTkEntry(row_helper, width=90)
-        self.entry_helper_fuel.insert(0, "15")
-        self.entry_helper_fuel.pack(side="left")
-
-        ctk.CTkButton(
-            helper,
-            text="Usar valores para preencher base",
-            command=self._apply_helper_pit_values,
-            width=220,
-        ).pack(anchor="w", padx=8, pady=(4, 6))
+        ).pack(fill="x", pady=(4, 0))
 
         self.lbl_pit_model_note = ctk.CTkLabel(
             sf,
-            text="Pit times are auto-calibrated from telemetry. Disable auto-calibration to edit manually.",
+            text="Pit times are auto-calibrated from telemetry.",
             anchor="w",
             wraplength=500,
             text_color="#a0a0a0",
@@ -2309,57 +2286,38 @@ class FuelOverlayApp(ctk.CTk):
 
     def _refresh_pit_entry_state(self) -> None:
         auto_on = bool(self.var_ac_enabled.get())
-        state = "disabled" if auto_on else "normal"
         note = (
-            "Pit times are auto-calibrated from telemetry. Disable auto-calibration to edit manually."
+            "Pit times are auto-calibrated from telemetry."
             if auto_on
-            else "Manual overrides enabled for pit timing model."
+            else "Auto-calibration disabled; o modelo congela nos valores já coletados."
         )
-
-        tire_linked = bool(self.var_tires_with_fuel.get())
-        for ent in (self.entry_pit_base, self.entry_fill_rate):
-            try:
-                ent.configure(state=state)
-            except Exception:
-                pass
-
-        tire_state = state
-        if tire_linked:
-            tire_state = "disabled"
-            self._set_entry_value(self.entry_tire_time, 0.0)
-        try:
-            self.entry_tire_time.configure(state=tire_state)
-        except Exception:
-            pass
 
         try:
             self.lbl_pit_model_note.configure(text=note)
         except Exception:
             pass
 
-    def _apply_helper_pit_values(self) -> None:
-        try:
-            lane_time = float(self.entry_helper_lane.get())
-            fuel_added = float(self.entry_helper_fuel.get())
-            fill_rate = float(self.entry_fill_rate.get())
-            tire_time = 0.0 if bool(self.var_tires_with_fuel.get()) else float(self.entry_tire_time.get())
-        except Exception:
-            return
-
-        if fill_rate <= 0:
-            return
-
-        base_loss = lane_time - (fuel_added / fill_rate) - tire_time
-        base_loss = max(0.0, base_loss)
-        self._set_entry_value(self.entry_pit_base, round(base_loss, 1))
-
     def _sync_pit_entries_from_config(self) -> None:
         pit_cfg = self.config_data.get("pit", {})
-        self._set_entry_value(self.entry_pit_base, pit_cfg.get("pit_base_loss_s", 40.0))
-        self._set_entry_value(self.entry_fill_rate, pit_cfg.get("fuel_fill_rate", 2.5))
-        self._set_entry_value(self.entry_tire_time, pit_cfg.get("tire_service_time_s", 18.0))
+        base = pit_cfg.get("pit_base_loss_s")
+        fill_rate = pit_cfg.get("fuel_fill_rate")
+        tire_time = pit_cfg.get("tire_service_time_s")
+        tires_with_fuel = bool(pit_cfg.get("tires_with_fuel", False))
+
+        pieces = []
+        if base is not None:
+            pieces.append(f"base={base:.1f}s")
+        if fill_rate is not None:
+            pieces.append(f"fill={fill_rate:.2f}u/s")
+        if tire_time is not None:
+            pieces.append(f"pneus={tire_time:.1f}s")
+        if tires_with_fuel:
+            pieces.append("pneus junto com fuel")
+
+        summary = "Modelo atual: " + (" | ".join(pieces) if pieces else "aguardando calibração automática")
         try:
-            self.var_tires_with_fuel.set(bool(pit_cfg.get("tires_with_fuel", False)))
+            self.pit_model_summary.set(summary)
+            self.var_tires_with_fuel.set(tires_with_fuel)
         except Exception:
             pass
 
@@ -2500,18 +2458,6 @@ class FuelOverlayApp(ctk.CTk):
 
         # Pit
         try:
-            self.config_data["pit"]["pit_base_loss_s"] = float(self.entry_pit_base.get())
-        except Exception:
-            pass
-        try:
-            self.config_data["pit"]["fuel_fill_rate"] = float(self.entry_fill_rate.get())
-        except Exception:
-            pass
-        try:
-            self.config_data["pit"]["tire_service_time_s"] = float(self.entry_tire_time.get())
-        except Exception:
-            pass
-        try:
             self.config_data["pit"]["tires_with_fuel"] = bool(self.var_tires_with_fuel.get())
         except Exception:
             pass
@@ -2610,6 +2556,26 @@ class FuelOverlayApp(ctk.CTk):
         self._apply_section_visibility()
         self._sync_pit_entries_from_config()
         self._refresh_pit_entry_state()
+
+    def _wire_drag_bindings(self) -> None:
+        """Ensure drag handlers are attached to key containers for easier moves."""
+
+        def _bind_drag(target: Any) -> None:
+            if target is None:
+                return
+            try:
+                target.bind("<ButtonPress-1>", self._on_mouse_down, add="+")
+                target.bind("<B1-Motion>", self._on_mouse_drag, add="+")
+                target.bind("<ButtonRelease-1>", self._on_mouse_up, add="+")
+            except Exception:
+                pass
+
+        _bind_drag(self.frame if hasattr(self, "frame") else None)
+        _bind_drag(self.tabs if hasattr(self, "tabs") else None)
+
+        # also cover detached sections if they exist at binding time
+        for win in list(self.detached_windows.values()):
+            _bind_drag(win)
 
     # ----------------------------
     # Drag handlers
