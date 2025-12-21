@@ -1550,9 +1550,6 @@ class FuelOverlayApp(ctk.CTk):
         self.bind("<B1-Motion>", self._on_mouse_drag)
         self.bind("<ButtonRelease-1>", self._on_mouse_up)
 
-        # close
-        self.bind("<Escape>", lambda e: self._close())
-
         # UI
         self._build_ui()
         self._wire_drag_bindings()
@@ -2546,6 +2543,19 @@ class FuelOverlayApp(ctk.CTk):
         self.entry_beep_thr = self._settings_entry(sf, "Beep threshold:", self.config_data["audio"].get("risk_beep_threshold", 85))
         self.entry_beep_cd = self._settings_entry(sf, "Beep cooldown (s):", self.config_data["audio"].get("beep_cooldown_s", 3.0))
 
+        # -------- Hotkeys
+        ctk.CTkLabel(sf, text="Hotkeys", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
+        hk_cfg = self.config_data.get("hotkeys", {})
+        self.entry_hk_margin_up = self._settings_entry(sf, "Margin up:", hk_cfg.get("margin_up", ""), width=180)
+        self.entry_hk_margin_down = self._settings_entry(sf, "Margin down:", hk_cfg.get("margin_down", ""), width=180)
+        self.entry_hk_cycle_plan = self._settings_entry(sf, "Cycle plan:", hk_cfg.get("cycle_plan", ""), width=180)
+        self.entry_hk_apply_opt1 = self._settings_entry(sf, "Apply opt #1:", hk_cfg.get("apply_opt1", ""), width=180)
+        self.entry_hk_apply_opt2 = self._settings_entry(sf, "Apply opt #2:", hk_cfg.get("apply_opt2", ""), width=180)
+        self.entry_hk_apply_opt3 = self._settings_entry(sf, "Apply opt #3:", hk_cfg.get("apply_opt3", ""), width=180)
+        self.entry_hk_toggle_settings = self._settings_entry(
+            sf, "Toggle settings:", hk_cfg.get("toggle_settings", ""), width=180
+        )
+
         # -------- Macros
         ctk.CTkLabel(sf, text="Chat Macros", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
         self.var_macro_enabled = ctk.BooleanVar(value=bool(self.config_data["macro"].get("enabled", False)))
@@ -2830,6 +2840,27 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             pass
 
+        # Hotkeys
+        hk_cfg = self.config_data.setdefault("hotkeys", {})
+        hk_entries = {
+            "margin_up": self.entry_hk_margin_up,
+            "margin_down": self.entry_hk_margin_down,
+            "cycle_plan": self.entry_hk_cycle_plan,
+            "apply_opt1": self.entry_hk_apply_opt1,
+            "apply_opt2": self.entry_hk_apply_opt2,
+            "apply_opt3": self.entry_hk_apply_opt3,
+            "toggle_settings": self.entry_hk_toggle_settings,
+        }
+        for key, entry in hk_entries.items():
+            try:
+                val = str(entry.get()).strip()
+                if val:
+                    hk_cfg[key] = val
+                else:
+                    hk_cfg.pop(key, None)
+            except Exception:
+                pass
+
         # Macro
         self.config_data["macro"]["enabled"] = bool(self.var_macro_enabled.get())
         self.config_data["macro"]["chat_key"] = str(self.entry_chatkey.get() or "t")
@@ -2890,6 +2921,18 @@ class FuelOverlayApp(ctk.CTk):
                 pass
 
         # macros / hotkeys
+        try:
+            hk_cfg = self.config_data.get("hotkeys", {})
+            self._set_entry_value(self.entry_hk_margin_up, hk_cfg.get("margin_up", ""))
+            self._set_entry_value(self.entry_hk_margin_down, hk_cfg.get("margin_down", ""))
+            self._set_entry_value(self.entry_hk_cycle_plan, hk_cfg.get("cycle_plan", ""))
+            self._set_entry_value(self.entry_hk_apply_opt1, hk_cfg.get("apply_opt1", ""))
+            self._set_entry_value(self.entry_hk_apply_opt2, hk_cfg.get("apply_opt2", ""))
+            self._set_entry_value(self.entry_hk_apply_opt3, hk_cfg.get("apply_opt3", ""))
+            self._set_entry_value(self.entry_hk_toggle_settings, hk_cfg.get("toggle_settings", ""))
+        except Exception:
+            pass
+
         self.injector = self._build_injector_from_config()
         self._remove_hotkeys()
         self._setup_hotkeys()
