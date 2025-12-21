@@ -781,6 +781,24 @@ class WetnessBrain:
         ):
             wet_eff = 0.05  # ~5% → praticamente seco
 
+        # Se todos os sinais apontam para pista seca, não recomendamos pit para chuva.
+        if (
+            (prec is None or prec < 0.02)
+            and (wet_eff is None or wet_eff < 0.10)
+            and (grip is None or grip > 0.88)
+            and aqua == 0
+            and (declared_wet is False or wet_eff < 0.08)
+        ):
+            details = {
+                "wet": wet,
+                "wet_eff": wet_eff,
+                "prec": prec,
+                "grip": grip,
+                "aqua": aqua,
+                "trend": trend,
+            }
+            return "STAY SLICKS", 0, details
+
         score = 0.0
         if declared_wet:
             score += 12.0
@@ -2155,6 +2173,15 @@ class FuelOverlayApp(ctk.CTk):
         self.entry_clean_air = self._settings_entry(sf, "Clean air target (s):", self.config_data["pit"].get("clean_air_target_s", 2.0))
         self.entry_offsets = self._settings_entry(sf, "Lookahead laps:", self.config_data["pit"].get("max_offsets", 3))
 
+        self.lbl_pit_model_note = ctk.CTkLabel(
+            sf,
+            text="Pit times are auto-calibrated from telemetry. Disable auto-calibration to edit manually.",
+            anchor="w",
+            wraplength=500,
+            text_color="#a0a0a0",
+        )
+        self.lbl_pit_model_note.pack(fill="x", pady=(4, 4))
+
         # Auto calibration toggles
         ctk.CTkLabel(sf, text="Auto-calibration (from telemetry pit stops)", font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", pady=(10, 4))
         ac = self.config_data["pit"].get("auto_calibrate", {})
@@ -2163,10 +2190,12 @@ class FuelOverlayApp(ctk.CTk):
         self.var_ac_fill = ctk.BooleanVar(value=bool(ac.get("update_fill_rate", True)))
         self.var_ac_tire = ctk.BooleanVar(value=bool(ac.get("update_tire_time", True)))
 
-        ctk.CTkCheckBox(sf, text="Enable", variable=self.var_ac_enabled).pack(anchor="w")
-        ctk.CTkCheckBox(sf, text="Update base loss", variable=self.var_ac_base).pack(anchor="w")
-        ctk.CTkCheckBox(sf, text="Update fill rate", variable=self.var_ac_fill).pack(anchor="w")
-        ctk.CTkCheckBox(sf, text="Update tire time", variable=self.var_ac_tire).pack(anchor="w")
+        ctk.CTkCheckBox(sf, text="Enable", variable=self.var_ac_enabled, command=self._refresh_pit_entry_state).pack(anchor="w")
+        ctk.CTkCheckBox(sf, text="Update base loss", variable=self.var_ac_base, command=self._refresh_pit_entry_state).pack(anchor="w")
+        ctk.CTkCheckBox(sf, text="Update fill rate", variable=self.var_ac_fill, command=self._refresh_pit_entry_state).pack(anchor="w")
+        ctk.CTkCheckBox(sf, text="Update tire time", variable=self.var_ac_tire, command=self._refresh_pit_entry_state).pack(anchor="w")
+
+        self._refresh_pit_entry_state()
 
         # -------- Audio
         ctk.CTkLabel(sf, text="Audio", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
@@ -2208,6 +2237,50 @@ class FuelOverlayApp(ctk.CTk):
         ent.insert(0, str(value))
         ent.pack(side="left")
         return ent
+
+    @staticmethod
+    def _entry_disabled(entry: Any) -> bool:
+        try:
+            return str(entry.cget("state")) == "disabled"
+        except Exception:
+            return False
+
+    @staticmethod
+    def _set_entry_value(entry: Any, value: Any) -> None:
+        try:
+            state = entry.cget("state")
+            entry.configure(state="normal")
+            entry.delete(0, ctk.END)
+            entry.insert(0, str(value))
+            entry.configure(state=state)
+        except Exception:
+            pass
+
+    def _refresh_pit_entry_state(self) -> None:
+        auto_on = bool(self.var_ac_enabled.get())
+        state = "disabled" if auto_on else "normal"
+        note = (
+            "Pit times are auto-calibrated from telemetry. Disable auto-calibration to edit manually."
+            if auto_on
+            else "Manual overrides enabled for pit timing model."
+        )
+
+        for ent in (self.entry_pit_base, self.entry_fill_rate, self.entry_tire_time):
+            try:
+                ent.configure(state=state)
+            except Exception:
+                pass
+
+        try:
+            self.lbl_pit_model_note.configure(text=note)
+        except Exception:
+            pass
+
+    def _sync_pit_entries_from_config(self) -> None:
+        pit_cfg = self.config_data.get("pit", {})
+        self._set_entry_value(self.entry_pit_base, pit_cfg.get("pit_base_loss_s", 40.0))
+        self._set_entry_value(self.entry_fill_rate, pit_cfg.get("fuel_fill_rate", 2.5))
+        self._set_entry_value(self.entry_tire_time, pit_cfg.get("tire_service_time_s", 18.0))
 
     def _apply_section_visibility(self) -> None:
         """Show/hide overlay sections while keeping a stable order."""
@@ -2674,8 +2747,10 @@ class FuelOverlayApp(ctk.CTk):
 
         self._auto_tank_capacity_l = new_val
         try:
+            self.entry_tank.configure(state="normal")
             self.entry_tank.delete(0, ctk.END)
             self.entry_tank.insert(0, new_text)
+            self.entry_tank.configure(state="disabled")
         except Exception:
             return
 
@@ -3138,6 +3213,8 @@ class FuelOverlayApp(ctk.CTk):
             if tire_est > 0.0:
                 cur = float(pit.get("tire_service_time_s", 18.0))
                 pit["tire_service_time_s"] = (1 - alpha) * cur + alpha * tire_est
+
+        self._sync_pit_entries_from_config()
 
     def _estimate_laps_remaining(self, avg_lap_time: Optional[float]) -> Optional[float]:
         # 1) SessionLapsRemainEx
