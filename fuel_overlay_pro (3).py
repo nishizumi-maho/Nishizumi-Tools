@@ -1686,20 +1686,44 @@ class FuelOverlayApp(ctk.CTk):
     def _build_overlay_tab(self) -> None:
         # Top row (status + save)
         top = ctk.CTkFrame(self.tab_overlay, fg_color="transparent")
-        top.pack(fill="x", padx=4, pady=(4, 6))
+        top.pack(fill="x", padx=6, pady=(6, 8))
 
-        self.lbl_title = ctk.CTkLabel(top, text="Fuel Overlay Pro", font=("Segoe UI", 14, "bold"), anchor="w")
-        self.lbl_title.pack(side="left")
+        title_box = ctk.CTkFrame(top, fg_color="transparent")
+        title_box.pack(side="left", fill="x", expand=True)
 
-        self.btn_save = ctk.CTkButton(top, text="Save", width=70, command=self._on_save_clicked)
-        self.btn_save.pack(side="right", padx=(6, 0))
+        self.lbl_title = ctk.CTkLabel(title_box, text="Fuel Overlay Pro", font=("Segoe UI", 15, "bold"), anchor="w")
+        self.lbl_title.pack(anchor="w")
+        self.lbl_subtitle = ctk.CTkLabel(
+            title_box,
+            text="Pit timing, fuel math e macros em um painel compacto",
+            font=("Segoe UI", 11),
+            anchor="w",
+        )
+        self.lbl_subtitle.pack(anchor="w")
 
-        self.btn_cfg = ctk.CTkButton(top, text="⚙", width=44, command=lambda: self.tabs.set("Settings"))
+        btn_box = ctk.CTkFrame(top, fg_color="transparent")
+        btn_box.pack(side="right")
+
+        self.btn_cfg = ctk.CTkButton(btn_box, text="⚙ Settings", width=96, command=lambda: self.tabs.set("Settings"))
         self.btn_cfg.pack(side="right")
+
+        self.btn_save = ctk.CTkButton(
+            btn_box,
+            text="💾 Salvar layout",
+            width=130,
+            fg_color=("#1f6aa5", "#1f6aa5"),
+            hover_color=("#1b5c8c", "#1b5c8c"),
+            command=self._on_save_clicked,
+        )
+        self.btn_save.pack(side="right", padx=(0, 8))
 
         # Quick controls row
         ctrl = ctk.CTkFrame(self.tab_overlay, fg_color="transparent")
-        ctrl.pack(fill="x", padx=4, pady=(0, 6))
+        ctrl.pack(fill="x", padx=8, pady=(0, 8))
+        ctrl.columnconfigure(0, weight=1)
+        ctrl.columnconfigure(1, weight=1)
+        ctrl.columnconfigure(2, weight=0)
+        ctrl.columnconfigure(3, weight=0)
 
         # Method dropdown
         self.var_method = ctk.StringVar(value=self.METHOD_LABELS.get(self.config_data["fuel"]["method"], self.METHOD_LABELS["road_fav"]))
@@ -1708,9 +1732,10 @@ class FuelOverlayApp(ctk.CTk):
             values=list(self.METHOD_LABELS.values()),
             variable=self.var_method,
             command=self._on_method_change,
-            width=320,
+            width=340,
         )
-        self.opt_method.pack(side="left")
+        ctk.CTkLabel(ctrl, text="Estimativa de consumo", anchor="w").grid(row=0, column=0, sticky="w")
+        self.opt_method.grid(row=1, column=0, sticky="ew", padx=(0, 8))
 
         # Plan dropdown
         self.var_plan = ctk.StringVar(value=self.PLAN_LABELS.get(self.config_data["fuel"].get("plan_mode", "safe"), self.PLAN_LABELS["safe"]))
@@ -1721,24 +1746,29 @@ class FuelOverlayApp(ctk.CTk):
             command=self._on_plan_change,
             width=110,
         )
-        self.opt_plan.pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(ctrl, text="Modo de plano", anchor="w").grid(row=0, column=1, sticky="w")
+        self.opt_plan.grid(row=1, column=1, sticky="ew")
 
         # N
-        ctk.CTkLabel(ctrl, text="N:", width=18).pack(side="left", padx=(8, 0))
-        self.entry_n = ctk.CTkEntry(ctrl, width=52)
+        entry_box = ctk.CTkFrame(ctrl, fg_color="transparent")
+        entry_box.grid(row=1, column=2, padx=(12, 6), sticky="e")
+        ctk.CTkLabel(entry_box, text="N laps", width=54).pack(anchor="e")
+        self.entry_n = ctk.CTkEntry(entry_box, width=60)
         self.entry_n.insert(0, str(self.config_data["fuel"].get("n", 10)))
-        self.entry_n.pack(side="left", padx=(4, 0))
+        self.entry_n.pack(anchor="e", pady=(2, 0))
 
         # %
-        ctk.CTkLabel(ctrl, text="%:", width=18).pack(side="left", padx=(8, 0))
-        self.entry_pct = ctk.CTkEntry(ctrl, width=52)
+        pct_box = ctk.CTkFrame(ctrl, fg_color="transparent")
+        pct_box.grid(row=1, column=3, padx=(6, 0), sticky="e")
+        ctk.CTkLabel(pct_box, text="Top %", width=54).pack(anchor="e")
+        self.entry_pct = ctk.CTkEntry(pct_box, width=60)
         self.entry_pct.insert(0, str(self.config_data["fuel"].get("top_percent", 20)))
-        self.entry_pct.pack(side="left", padx=(4, 0))
+        self.entry_pct.pack(anchor="e", pady=(2, 0))
 
         # Ignore yellow
         self.var_ignore = ctk.BooleanVar(value=bool(self.config_data["fuel"].get("ignore_yellow", True)))
-        self.chk_ignore = ctk.CTkCheckBox(ctrl, text="Ignore yellows", variable=self.var_ignore, command=self._on_ignore_toggle)
-        self.chk_ignore.pack(side="right")
+        self.chk_ignore = ctk.CTkCheckBox(ctrl, text="Ignorar voltas em amarelo", variable=self.var_ignore, command=self._on_ignore_toggle)
+        self.chk_ignore.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         # Status line
         self.lbl_status = ctk.CTkLabel(self.tab_overlay, text="iRacing: waiting…", anchor="w")
@@ -1848,10 +1878,12 @@ class FuelOverlayApp(ctk.CTk):
                 return
             try:
                 # Windows: event.delta is typically +/-120 per notch.
-                # macOS: delta is smaller, but still usable.
-                delta = int(-1 * (event.delta / 120)) if event.delta else 0
-                if delta != 0:
-                    canvas.yview_scroll(delta, "units")
+                # macOS / touchpads: delta can be smaller but more frequent.
+                delta_raw = int(event.delta) if event.delta else 0
+                step = int(-1 * (delta_raw / 120))
+                if step == 0:
+                    step = -1 if delta_raw > 0 else 1
+                canvas.yview_scroll(step * 2, "units")
             except Exception:
                 pass
 
@@ -1862,7 +1894,7 @@ class FuelOverlayApp(ctk.CTk):
             if canvas is None:
                 return
             try:
-                canvas.yview_scroll(-1, "units")
+                canvas.yview_scroll(-2, "units")
             except Exception:
                 pass
 
@@ -1873,7 +1905,7 @@ class FuelOverlayApp(ctk.CTk):
             if canvas is None:
                 return
             try:
-                canvas.yview_scroll(1, "units")
+                canvas.yview_scroll(2, "units")
             except Exception:
                 pass
 
