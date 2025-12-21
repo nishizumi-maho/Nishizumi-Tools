@@ -623,6 +623,18 @@ class FuelHistory:
 # Wetness-aware assistant (heuristic)
 # ============================================================
 
+TRACK_WETNESS_ENUM = {
+    0: "UNKNOWN",
+    1: "Dry",
+    2: "MostlyDry",
+    3: "VeryLightlyWet",
+    4: "LightlyWet",
+    5: "ModeratelyWet",
+    6: "VeryWet",
+    7: "ExtremelyWet",
+}
+
+
 class WetnessBrain:
     def __init__(
         self,
@@ -645,6 +657,8 @@ class WetnessBrain:
         self.aquaplane_events = RollingEvents()
 
         self._last_wetness: Optional[float] = None
+        self._last_wetness_raw: Optional[float] = None
+        self._last_wetness_label: Optional[str] = None
         self._last_update_t: Optional[float] = None
 
     @staticmethod
@@ -656,10 +670,35 @@ class WetnessBrain:
         except Exception:
             return None
 
-        # Some builds report 0..100
+        # New builds expose TrackWetness as enum 1..7 (Dry..ExtremelyWet).
+        # Convert to 0..1 scale (Dry=0.0, ExtremelyWet=1.0) while still
+        # tolerating older 0..1 or 0..100% formats.
+        try:
+            xi = int(x)
+        except Exception:
+            xi = None
+
+        if xi is not None and 1 <= xi <= 7 and abs(x - xi) < 1e-3:
+            return (xi - 1) / 6.0
+
+        if 0.0 <= x <= 1.0:
+            return x
+
         if x > 1.5:
-            x = x / 100.0
-        return max(0.0, min(1.0, x))
+            return max(0.0, min(1.0, x / 100.0))
+
+        return None
+
+    @staticmethod
+    def _wetness_label(w: Optional[float]) -> Optional[str]:
+        try:
+            x = int(float(w))
+        except Exception:
+            return None
+
+        if 1 <= x <= 7:
+            return TRACK_WETNESS_ENUM.get(x, f"UNKNOWN({x})")
+        return None
 
     @staticmethod
     def _norm_precip(p: Optional[float]) -> Optional[float]:
@@ -689,6 +728,9 @@ class WetnessBrain:
     ) -> None:
         wet = self._norm_wetness(track_wetness)
         prec = self._norm_precip(precipitation)
+
+        self._last_wetness_raw = track_wetness
+        self._last_wetness_label = self._wetness_label(track_wetness)
 
         if wet is not None:
             self.wetness_hist.add(wet)
@@ -762,8 +804,10 @@ class WetnessBrain:
         aqua = self.aquaplane_events.count_last(35.0, now)
         trend = self.wetness_trend()
 
-        # Heurística para corrigir bug clássico do iRacing:
-        # TrackWetness travado em 1.0 (100%) mesmo com pista seca.
+        # Heurística para corrigir bug clássico do iRacing (versões antigas):
+        # TrackWetness travado em 1.0 mesmo com pista seca. Nas builds atuais
+        # TrackWetness é um enum (1=Dry, 7=ExtremelyWet), mas mantemos esta
+        # proteção para sessões onde o valor pareça incoerente.
         #
         # Se:
         #  - pista não está declarada molhada
@@ -792,6 +836,8 @@ class WetnessBrain:
             details = {
                 "wet": wet,
                 "wet_eff": wet_eff,
+                "wet_raw": self._last_wetness_raw,
+                "wet_label": self._last_wetness_label,
                 "prec": prec,
                 "grip": grip,
                 "aqua": aqua,
@@ -828,6 +874,8 @@ class WetnessBrain:
         details = {
             "wet": wet,
             "wet_eff": wet_eff,
+            "wet_raw": self._last_wetness_raw,
+            "wet_label": self._last_wetness_label,
             "prec": prec,
             "grip": grip,
             "aqua": aqua,
@@ -3572,8 +3620,15 @@ class FuelOverlayApp(ctk.CTk):
         grip = details.get("grip")
         aqua = details.get("aqua")
         trend = details.get("trend")
+        wet_label = details.get("wet_label")
+        wet_raw = details.get("wet_raw")
 
         wet_s = "--" if wet is None else f"{wet*100:3.0f}%"
+        if wet_label:
+            wet_s += f" ({wet_label})"
+        elif wet_raw is not None:
+            wet_s += f" (raw={wet_raw})"
+
         tr_s = "" if trend is None else ("↑" if trend > 0.02 else ("↓" if trend < -0.02 else "→"))
         prec_s = "--" if prec is None else f"{prec:.2f}"
         grip_s = "--" if grip is None else f"{grip:.2f}"
