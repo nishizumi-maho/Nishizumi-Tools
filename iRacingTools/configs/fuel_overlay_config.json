@@ -48,6 +48,7 @@
         "apply_opt1": "alt+1",
         "apply_opt2": "alt+2",
         "apply_opt3": "alt+3",
+        "test_macro": "ctrl+alt+m",
         "wet": "alt+w",
         "slick": "alt+s"
     },
