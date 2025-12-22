@@ -1517,7 +1517,7 @@ class FuelOverlayApp(ctk.CTk):
         self.pit_cal = PitStopCalibrator()
 
         # macros
-        self.injector = None
+        self.injector = self._build_injector_from_config()
 
         # detached overlay windows (per section)
         self.detached_windows: Dict[str, ctk.CTkToplevel] = {}
@@ -1965,38 +1965,15 @@ class FuelOverlayApp(ctk.CTk):
         if not text or keyboard is None:
             return False
 
-        cfg = self.config_data.get("macro", {})
-
-        require_focus = bool(cfg.get("require_iracing_foreground", True))
-        win_sub = str(cfg.get("iracing_window_substring", "iracing") or "iracing")
-        if require_focus and not is_iracing_foreground(win_sub):
-            return False
-
-        debounce_ms = int(cfg.get("debounce_ms", 0) or 0)
-        now = time.monotonic()
-        if debounce_ms > 0 and (now - self._macro_last_send_t) * 1000.0 < debounce_ms:
-            return False
-
-        chat_key = str(cfg.get("chat_key", "t") or "t")
-        open_delay = float(cfg.get("open_delay", 0.02) or 0.02)
-        injection = str(cfg.get("injection", "type") or "type").lower()
-        typing_interval = float(cfg.get("typing_interval", 0.001) or 0.0)
+        if self.injector is None:
+            self.injector = self._build_injector_from_config()
 
         try:
             with self._macro_lock:
-                keyboard.send(chat_key)
-                time.sleep(max(0.0, open_delay))
-
-                if injection == "clipboard" and copy_to_clipboard(text):
-                    keyboard.send("ctrl+v")
-                    time.sleep(0.01)
-                else:
-                    keyboard.write(text, delay=max(0.0, typing_interval))
-
-                keyboard.send("enter")
-
-            self._macro_last_send_t = now
-            return True
+                ok = self.injector.send(text)
+            if ok:
+                self._macro_last_send_t = time.monotonic()
+            return ok
         except Exception:
             return False
 
@@ -2013,6 +1990,9 @@ class FuelOverlayApp(ctk.CTk):
         fuel_add_val = max(0.0, float(fuel_add))
 
         if self._send_pit_fuel_via_sdk(fuel_add_val):
+            return
+
+        if not self.config_data.get("macro", {}).get("enabled", False):
             return
 
         tmpl = self._apply_plan_template()
@@ -2615,6 +2595,9 @@ class FuelOverlayApp(ctk.CTk):
         self.entry_hk_apply_opt1 = self._settings_entry(sf, "Apply opt #1:", hk_cfg.get("apply_opt1", ""), width=180)
         self.entry_hk_apply_opt2 = self._settings_entry(sf, "Apply opt #2:", hk_cfg.get("apply_opt2", ""), width=180)
         self.entry_hk_apply_opt3 = self._settings_entry(sf, "Apply opt #3:", hk_cfg.get("apply_opt3", ""), width=180)
+        self.entry_hk_test_macro = self._settings_entry(
+            sf, "Test fuel macro:", hk_cfg.get("test_macro", ""), width=180
+        )
         self.entry_hk_toggle_settings = self._settings_entry(
             sf, "Toggle settings:", hk_cfg.get("toggle_settings", ""), width=180
         )
@@ -2935,6 +2918,7 @@ class FuelOverlayApp(ctk.CTk):
             "apply_opt1": self.entry_hk_apply_opt1,
             "apply_opt2": self.entry_hk_apply_opt2,
             "apply_opt3": self.entry_hk_apply_opt3,
+            "test_macro": self.entry_hk_test_macro,
             "toggle_settings": self.entry_hk_toggle_settings,
         }
         for key, entry in hk_entries.items():
@@ -2971,6 +2955,9 @@ class FuelOverlayApp(ctk.CTk):
         self._drag_enabled = bool(self.config_data["ui"].get("drag_enabled", True))
 
         self.history.ignore_yellow = bool(self.config_data["fuel"].get("ignore_yellow", True))
+
+        # rebuild macro injector from latest config
+        self.injector = self._build_injector_from_config()
 
         try:
             self.var_easy_mode.set(bool(self.config_data["ui"].get("easy_mode", False)))
@@ -3020,6 +3007,7 @@ class FuelOverlayApp(ctk.CTk):
             self._set_entry_value(self.entry_hk_apply_opt1, hk_cfg.get("apply_opt1", ""))
             self._set_entry_value(self.entry_hk_apply_opt2, hk_cfg.get("apply_opt2", ""))
             self._set_entry_value(self.entry_hk_apply_opt3, hk_cfg.get("apply_opt3", ""))
+            self._set_entry_value(self.entry_hk_test_macro, hk_cfg.get("test_macro", ""))
             self._set_entry_value(self.entry_hk_toggle_settings, hk_cfg.get("toggle_settings", ""))
         except Exception:
             pass
@@ -3143,6 +3131,11 @@ class FuelOverlayApp(ctk.CTk):
             cur = self.tabs.get()
             self.tabs.set("Settings" if cur != "Settings" else "Overlay")
 
+        def trigger_test_macro():
+            if not self.config_data.get("macro", {}).get("enabled", False):
+                return
+            self._dispatch_fuel_macro(5.0, offset_laps=0, pit_loss_s=0.0, success_pct=0)
+
         try:
             self._hk_ids.append(keyboard.add_hotkey(hk.get("margin_up", "ctrl+alt+up"), lambda: margin_add(+1)))
             self._hk_ids.append(keyboard.add_hotkey(hk.get("margin_down", "ctrl+alt+down"), lambda: margin_add(-1)))
@@ -3153,6 +3146,7 @@ class FuelOverlayApp(ctk.CTk):
             self._hk_ids.append(keyboard.add_hotkey(hk.get("apply_opt3", "alt+3"), lambda: apply_opt(3)))
 
             self._hk_ids.append(keyboard.add_hotkey(hk.get("toggle_settings", "ctrl+alt+o"), toggle_settings))
+            self._hk_ids.append(keyboard.add_hotkey(hk.get("test_macro", "ctrl+alt+m"), trigger_test_macro))
         except Exception:
             pass
 
