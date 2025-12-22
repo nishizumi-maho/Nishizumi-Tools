@@ -3508,7 +3508,8 @@ class FuelOverlayApp(ctk.CTk):
             # compute fuel figures
             fuel = float(fuel_level or 0.0)
             laps_possible = None
-            fuel_need_total = None
+            fuel_need_total = None  # total alvo para terminar (antes de considerar o que já tem no tanque)
+            fuel_missing_total = None  # quanto falta no total depois de considerar o que já está no tanque
             fuel_to_add = None
             finish_leftover = None
 
@@ -3527,7 +3528,9 @@ class FuelOverlayApp(ctk.CTk):
                         fuel_need_total = float(tank_capacity)
 
                 if fuel_need_total is not None:
-                    fuel_to_add = max(0.0, fuel_need_total - fuel)
+                    fuel_missing_total = max(0.0, fuel_need_total - fuel)
+                    # Fuel to add should be the remaining deficit after considering current tank level
+                    fuel_to_add = fuel_missing_total
                     finish_leftover = fuel + fuel_to_add - fuel_need_total
 
             # Auto fuel: ao entrar no pit stall, manda macro com fuel_to_add
