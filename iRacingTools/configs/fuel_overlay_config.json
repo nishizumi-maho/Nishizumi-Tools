@@ -21,9 +21,7 @@
         }
     },
     "pit": {
-        "pit_base_loss_s": 40.0,
-        "fuel_fill_rate": 2.5,
-        "tire_service_time_s": 18.0,
+        "pit_total_time_s": 40.0,
         "clean_air_target_s": 2.0
     },
     "macro": {

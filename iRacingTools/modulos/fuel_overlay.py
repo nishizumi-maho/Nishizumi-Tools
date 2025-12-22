@@ -1087,9 +1087,7 @@ class PitWindowAdvisor:
         *,
         avg_lap_time: Optional[float],
         lap_time_sigma: Optional[float],
-        pit_base_loss_s: float,
-        fuel_fill_rate: float,
-        tire_service_time_s: float,
+        pit_total_time_s: float,
         take_tires: bool,
         burn_per_lap: Optional[float],
         fuel_now: Optional[float],
@@ -1172,12 +1170,8 @@ class PitWindowAdvisor:
                 laps_remaining_after=laps_rem_after,
             )
 
-            # Pit time model: base + fueling + tires
-            pit_loss = float(pit_base_loss_s)
-            if fuel_add is not None and fuel_fill_rate > 1e-6:
-                pit_loss += float(fuel_add) / float(fuel_fill_rate)
-            if take_tires:
-                pit_loss += float(tire_service_time_s)
+            # Pit time model: single user-provided total
+            pit_loss = float(pit_total_time_s)
 
             # Predict gaps after pit using LapDistPct deltas (proxy)
             ahead_gap = None
@@ -1488,7 +1482,7 @@ class FuelOverlayApp(ctk.CTk):
     }
 
     DEFAULT_APPLY_MACRO = "!fuel {fuel_add:.2f}$"
-    PIT_CAL_KEYS = ("pit_base_loss_s", "fuel_fill_rate", "tire_service_time_s", "tires_with_fuel")
+    PIT_CAL_KEYS = ("pit_total_time_s",)
     PIT_PROFILE_META_KEYS = ("has_calibration",)
     PIT_PROFILE_KEYS = PIT_CAL_KEYS + PIT_PROFILE_META_KEYS
 
@@ -1603,23 +1597,11 @@ class FuelOverlayApp(ctk.CTk):
                 "tank_capacity": None,  # optional for "full" mode
             },
             "pit": {
-                "pit_base_loss_s": 40.0,
-                "fuel_fill_rate": 2.5,
-                "tire_service_time_s": 18.0,
-                "tires_with_fuel": False,
+                "pit_total_time_s": 40.0,
                 "clean_air_target_s": 2.0,
                 "max_offsets": 3,
                 "has_calibration": False,
                 "advanced_editing": False,
-                "auto_calibrate": {
-                    "enabled": True,
-                    "update_base_loss": True,
-                    "update_fill_rate": True,
-                    "update_tire_time": True,
-                    "ema_alpha": 0.25,
-                    "min_fuel_added": 0.5,
-                    "min_lane_time": 8.0,
-                },
             },
             "macro": {
                 "enabled": False,
@@ -1639,10 +1621,7 @@ class FuelOverlayApp(ctk.CTk):
             },
             "pit_profiles": {},
             "pit_profile_defaults": {
-                "pit_base_loss_s": 40.0,
-                "fuel_fill_rate": 2.5,
-                "tire_service_time_s": 18.0,
-                "tires_with_fuel": False,
+                "pit_total_time_s": 40.0,
                 "has_calibration": False,
             },
             "hotkeys": {
@@ -2519,14 +2498,7 @@ class FuelOverlayApp(ctk.CTk):
 
         # -------- Pit model settings
         ctk.CTkLabel(sf, text="Pit Time Model", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
-
-        self.var_tires_with_fuel = ctk.BooleanVar(value=bool(self.config_data["pit"].get("tires_with_fuel", False)))
-        ctk.CTkCheckBox(
-            sf,
-            text="Series fuels and changes tires together (no extra tire time)",
-            variable=self.var_tires_with_fuel,
-            command=self._refresh_pit_entry_state,
-        ).pack(anchor="w")
+        self.entry_pit_total = self._settings_entry(sf, "Pit total time (s):", self.config_data["pit"].get("pit_total_time_s", 40.0))
         self.entry_clean_air = self._settings_entry(sf, "Clean air target (s):", self.config_data["pit"].get("clean_air_target_s", 2.0))
         self.entry_offsets = self._settings_entry(sf, "Lookahead laps:", self.config_data["pit"].get("max_offsets", 3))
 
@@ -2556,37 +2528,6 @@ class FuelOverlayApp(ctk.CTk):
             wraplength=520,
             text_color="#a0a0a0",
         ).pack(fill="x", pady=(4, 6))
-
-        self.var_pit_advanced = ctk.BooleanVar(value=bool(self.config_data["pit"].get("advanced_editing", False)))
-        ctk.CTkCheckBox(
-            sf,
-            text="Advanced user: allow editing pit timings",
-            variable=self.var_pit_advanced,
-            command=self._refresh_pit_entry_state,
-        ).pack(anchor="w", pady=(0, 4))
-
-        self.entry_pit_base = self._settings_entry(sf, "Base loss (s):", self.config_data["pit"].get("pit_base_loss_s", ""))
-        self.entry_pit_fill = self._settings_entry(sf, "Fill rate (u/s):", self.config_data["pit"].get("fuel_fill_rate", ""))
-        self.entry_pit_tires = self._settings_entry(
-            sf,
-            "Tire time (s):",
-            self.config_data["pit"].get("tire_service_time_s", ""),
-        )
-
-        # Auto calibration toggles
-        ctk.CTkLabel(sf, text="Auto-calibration (from telemetry pit stops)", font=("Segoe UI", 11, "bold"), anchor="w").pack(fill="x", pady=(10, 4))
-        ac = self.config_data["pit"].get("auto_calibrate", {})
-        self.var_ac_enabled = ctk.BooleanVar(value=bool(ac.get("enabled", True)))
-        self.var_ac_base = ctk.BooleanVar(value=bool(ac.get("update_base_loss", True)))
-        self.var_ac_fill = ctk.BooleanVar(value=bool(ac.get("update_fill_rate", True)))
-        self.var_ac_tire = ctk.BooleanVar(value=bool(ac.get("update_tire_time", True)))
-
-        ctk.CTkCheckBox(sf, text="Enable", variable=self.var_ac_enabled, command=self._refresh_pit_entry_state).pack(anchor="w")
-        ctk.CTkCheckBox(sf, text="Update base loss", variable=self.var_ac_base, command=self._refresh_pit_entry_state).pack(anchor="w")
-        ctk.CTkCheckBox(sf, text="Update fill rate", variable=self.var_ac_fill, command=self._refresh_pit_entry_state).pack(anchor="w")
-        ctk.CTkCheckBox(sf, text="Update tire time", variable=self.var_ac_tire, command=self._refresh_pit_entry_state).pack(anchor="w")
-
-        self._refresh_pit_entry_state()
 
         # -------- Audio
         ctk.CTkLabel(sf, text="Audio", font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", pady=(12, 6))
@@ -2676,47 +2617,24 @@ class FuelOverlayApp(ctk.CTk):
             pass
 
     def _refresh_pit_entry_state(self) -> None:
-        advanced = bool(self.var_pit_advanced.get())
-        for ent in (self.entry_pit_base, self.entry_pit_fill, self.entry_pit_tires):
-            self._set_entry_enabled(ent, advanced)
-
-        try:
-            self.config_data.setdefault("pit", {})["advanced_editing"] = advanced
-        except Exception:
-            pass
+        self._set_entry_enabled(getattr(self, "entry_pit_total", None), True)
 
     def _sync_pit_entries_from_config(self) -> None:
         pit_cfg = self.config_data.get("pit", {})
         self._pit_profile_has_data = bool(pit_cfg.get("has_calibration", False))
-        base = pit_cfg.get("pit_base_loss_s")
-        fill_rate = pit_cfg.get("fuel_fill_rate")
-        tire_time = pit_cfg.get("tire_service_time_s")
-        tires_with_fuel = bool(pit_cfg.get("tires_with_fuel", False))
-
-        pieces = []
-        if base is not None:
-            pieces.append(f"base={base:.1f}s")
-        if fill_rate is not None:
-            pieces.append(f"fill={fill_rate:.2f}u/s")
-        if tire_time is not None:
-            pieces.append(f"tires={tire_time:.1f}s")
-        if tires_with_fuel:
-            pieces.append("tires with fuel")
+        total_time = pit_cfg.get("pit_total_time_s")
 
         if self._pit_profile_has_data:
-            summary = "Pit timings (car/track): " + (" | ".join(pieces) if pieces else "--")
-            info = "Informational values used for calculations; edit in advanced mode only if necessary."
+            summary = "Pit total time (car/track): "
+            summary += "--" if total_time is None else f"{float(total_time):.1f}s"
+            info = "Use a single total pit time (incluindo pneus + fuel) informado manualmente pelo piloto."
         else:
-            summary = "Pit timings: waiting for the first calibration for this car/track."
-            info = "Complete a test pit stop to record timings or enable advanced mode to fill them manually."
+            summary = "Pit total time: defina manualmente para este carro/pista."
+            info = "Some o tempo de troca de pneus, abastecimento e perda base e insira o total em segundos."
 
         try:
             self.pit_model_summary.set(summary)
-            self.var_tires_with_fuel.set(tires_with_fuel)
-            self.var_pit_advanced.set(bool(pit_cfg.get("advanced_editing", False)))
-            self._set_entry_value(self.entry_pit_base, "" if base is None else base)
-            self._set_entry_value(self.entry_pit_fill, "" if fill_rate is None else fill_rate)
-            self._set_entry_value(self.entry_pit_tires, "" if tire_time is None else tire_time)
+            self._set_entry_value(self.entry_pit_total, "" if total_time is None else total_time)
             self.pit_profile_info.set(info)
         except Exception:
             pass
@@ -2867,31 +2785,11 @@ class FuelOverlayApp(ctk.CTk):
 
         # Pit
         try:
-            self.config_data["pit"]["advanced_editing"] = bool(self.var_pit_advanced.get())
+            self.config_data["pit"]["pit_total_time_s"] = float(self.entry_pit_total.get())
+            self.config_data["pit"]["has_calibration"] = True
+            self._pit_profile_has_data = True
         except Exception:
             pass
-        try:
-            self.config_data["pit"]["tires_with_fuel"] = bool(self.var_tires_with_fuel.get())
-        except Exception:
-            pass
-        if bool(self.var_pit_advanced.get()):
-            try:
-                self.config_data["pit"]["pit_base_loss_s"] = float(self.entry_pit_base.get())
-            except Exception:
-                pass
-            try:
-                self.config_data["pit"]["fuel_fill_rate"] = float(self.entry_pit_fill.get())
-            except Exception:
-                pass
-            try:
-                self.config_data["pit"]["tire_service_time_s"] = float(self.entry_pit_tires.get())
-            except Exception:
-                pass
-            try:
-                self.config_data["pit"]["has_calibration"] = True
-                self._pit_profile_has_data = True
-            except Exception:
-                pass
         try:
             self.config_data["pit"]["clean_air_target_s"] = float(self.entry_clean_air.get())
         except Exception:
@@ -2900,13 +2798,6 @@ class FuelOverlayApp(ctk.CTk):
             self.config_data["pit"]["max_offsets"] = int(float(self.entry_offsets.get()))
         except Exception:
             pass
-
-        ac = self.config_data["pit"].get("auto_calibrate", {})
-        ac["enabled"] = bool(self.var_ac_enabled.get())
-        ac["update_base_loss"] = bool(self.var_ac_base.get())
-        ac["update_fill_rate"] = bool(self.var_ac_fill.get())
-        ac["update_tire_time"] = bool(self.var_ac_tire.get())
-        self.config_data["pit"]["auto_calibrate"] = ac
 
         # Audio
         self.config_data["audio"]["risk_beep"] = bool(self.var_beep.get())
@@ -3595,10 +3486,7 @@ class FuelOverlayApp(ctk.CTk):
 
             # pit time config (possibly updated by calibration)
             pit_cfg = self.config_data.get("pit", {})
-            pit_base = float(pit_cfg.get("pit_base_loss_s", 40.0))
-            fill_rate = float(pit_cfg.get("fuel_fill_rate", 2.5))
-            tires_with_fuel = bool(pit_cfg.get("tires_with_fuel", False))
-            tire_time = 0.0 if tires_with_fuel else float(pit_cfg.get("tire_service_time_s", 18.0))
+            pit_total = float(pit_cfg.get("pit_total_time_s", 40.0))
             clean_air_target = float(pit_cfg.get("clean_air_target_s", 2.0))
             max_offsets = int(pit_cfg.get("max_offsets", 3))
 
@@ -3606,9 +3494,7 @@ class FuelOverlayApp(ctk.CTk):
             opts = self.pit_advisor.build_options(
                 avg_lap_time=avg_lap_time,
                 lap_time_sigma=lap_sigma,
-                pit_base_loss_s=pit_base,
-                fuel_fill_rate=fill_rate,
-                tire_service_time_s=tire_time,
+                pit_total_time_s=pit_total,
                 take_tires=take_tires,
                 burn_per_lap=burn,
                 fuel_now=fuel,
@@ -3626,19 +3512,6 @@ class FuelOverlayApp(ctk.CTk):
                 clean_air_target_s=clean_air_target,
             )
             self._last_pit_options = opts
-
-            # pit telemetry calibration update
-            m = self.pit_cal.update(
-                now=now,
-                on_pit_road=bool(on_pit_road) if on_pit_road is not None else None,
-                in_pit_stall=bool(in_pit_stall) if in_pit_stall is not None else None,
-                speed_mps=float(speed) if speed is not None else None,
-                fuel_level=float(fuel_level) if fuel_level is not None else None,
-                pit_sv_flags=int(pit_sv_flags) if pit_sv_flags is not None else None,
-                pit_sv_fuel=float(pit_sv_fuel) if pit_sv_fuel is not None else None,
-            )
-            if m:
-                self._apply_pit_calibration(m)
 
             # --- labels
             status = "YELLOW" if yellow_now else "GREEN"
@@ -3711,9 +3584,7 @@ class FuelOverlayApp(ctk.CTk):
             )
             self.var_risk.set(f"Risk: {risk_score:3d} | {risk_reason}")
 
-            self.var_pit.set(
-                self._format_pit_options(opts, pit_base, fill_rate, tire_time, tires_with_fuel, easy_mode=easy_mode)
-            )
+            self.var_pit.set(self._format_pit_options(opts, pit_total, easy_mode=easy_mode))
 
             hk = self.config_data.get("hotkeys", {})
             self.var_hotkeys.set(
@@ -3747,51 +3618,6 @@ class FuelOverlayApp(ctk.CTk):
             except Exception:
                 pass
             self.after(500, self._tick)
-
-    def _apply_pit_calibration(self, m: PitMeasurement) -> None:
-        ac = self.config_data["pit"].get("auto_calibrate", {})
-        if not bool(ac.get("enabled", True)):
-            return
-
-        alpha = float(ac.get("ema_alpha", 0.25))
-        alpha = max(0.05, min(alpha, 0.6))
-
-        min_fuel = float(ac.get("min_fuel_added", 0.5))
-        min_lane = float(ac.get("min_lane_time", 8.0))
-
-        pit = self.config_data["pit"]
-
-        # update fill rate
-        if bool(ac.get("update_fill_rate", True)) and m.fill_rate is not None and m.fuel_added >= min_fuel:
-            cur = float(pit.get("fuel_fill_rate", 2.5))
-            pit["fuel_fill_rate"] = (1 - alpha) * cur + alpha * float(m.fill_rate)
-
-        # base/tire separation uses pit_lane_time - fueling_time (we don't know repairs/other services)
-        if m.pit_lane_time_s < min_lane:
-            return
-
-        residual = max(0.0, float(m.pit_lane_time_s) - float(m.fueling_time_s))
-
-        tires_sel = bool(m.tires_selected) if m.tires_selected is not None else None
-
-        # if tires not selected, residual ~ base loss
-        if bool(ac.get("update_base_loss", True)) and tires_sel is False:
-            cur = float(pit.get("pit_base_loss_s", 40.0))
-            pit["pit_base_loss_s"] = (1 - alpha) * cur + alpha * residual
-
-        # if tires selected, residual ~ base + tire_time
-        if bool(ac.get("update_tire_time", True)) and tires_sel is True:
-            base = float(pit.get("pit_base_loss_s", 40.0))
-            tire_est = residual - base
-            if tire_est > 0.0:
-                cur = float(pit.get("tire_service_time_s", 18.0))
-                pit["tire_service_time_s"] = (1 - alpha) * cur + alpha * tire_est
-
-        pit["has_calibration"] = True
-        self._pit_profile_has_data = True
-
-        self._sync_pit_entries_from_config()
-        self._persist_active_profile()
 
     def _estimate_laps_remaining(self, avg_lap_time: Optional[float]) -> Optional[float]:
         # 1) SessionLapsRemainEx
@@ -3905,10 +3731,7 @@ class FuelOverlayApp(ctk.CTk):
     def _format_pit_options(
         self,
         opts: List[PitOption],
-        pit_base: float,
-        fill_rate: float,
-        tire_time: float,
-        tires_with_fuel: bool = False,
+        pit_total: float,
         *,
         easy_mode: bool = False,
     ) -> str:
@@ -3932,8 +3755,7 @@ class FuelOverlayApp(ctk.CTk):
             return "Pit: -- (need avg lap time + traffic data)"
 
         lines = []
-        tires_s = "with fuel" if tires_with_fuel else f"{tire_time:.0f}s"
-        lines.append(f"Model: base={pit_base:.0f}s fill={fill_rate:.2f}u/s tires={tires_s}")
+        lines.append(f"Total pit time (manual): {pit_total:.1f}s")
         lines.append("Rank | When | Success | pos~ | gap(a/b) | add | pit | notes")
         for rank, o in enumerate(opts[:4], start=1):
             label = "NOW" if o.offset_laps == 0 else f"+{o.offset_laps}L"
@@ -3944,13 +3766,6 @@ class FuelOverlayApp(ctk.CTk):
             fa = "--" if o.fuel_add is None else f"{o.fuel_add:5.1f}"
             pl = "--" if o.pit_loss_s is None else f"{o.pit_loss_s:4.0f}s"
             lines.append(f" [{rank}] | {label:>3} | {suc:>7} | {pe:>4} | {ga:>6}/{gb:>6} | {fa:>5} | {pl:>4} | {o.notes}")
-
-        # show last pit calibration (if any)
-        lm = self.pit_cal.last_measurement
-        if lm is not None:
-            tires = "?" if lm.tires_selected is None else ("Y" if lm.tires_selected else "N")
-            fr = "--" if lm.fill_rate is None else f"{lm.fill_rate:.2f}"
-            lines.append(f"Last pit obs: lane={lm.pit_lane_time_s:.1f}s fuel+={lm.fuel_added:.2f} time={lm.fueling_time_s:.1f}s fill~{fr} tiresSel={tires}")
 
         return "\n".join(lines)
 
