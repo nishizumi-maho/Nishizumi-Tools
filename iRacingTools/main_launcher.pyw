@@ -9,14 +9,41 @@ import json
 import winreg # Biblioteca para mexer no Registro do Windows
 
 # --- CONFIGURAÇÃO DE CAMINHOS ---
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_DIR = os.path.join(ROOT_DIR, "configs")
+def _resource_root() -> str:
+    """Retorna a pasta onde os recursos foram empacotados.
+
+    Quando compilado com PyInstaller (exe), os assets ficam em ``sys._MEIPASS``;
+    fora disso, utilizamos a pasta do projeto.
+    """
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _config_root() -> str:
+    """Retorna uma pasta gravável para os arquivos de configuração."""
+
+    if getattr(sys, "frozen", False):
+        return os.path.join(os.path.dirname(sys.executable), "configs")
+    return os.path.join(_resource_root(), "configs")
+
+
+ROOT_DIR = _resource_root()
+CONFIG_DIR = _config_root()
 LAUNCHER_CONFIG = os.path.join(CONFIG_DIR, "launcher_config.json")
 AUDIO_DIR = os.path.join(ROOT_DIR, "sons")
 
-# Garante que a pasta configs existe
+# Prepara pasta de configs (copia defaults ao compilar para exe)
 if not os.path.exists(CONFIG_DIR):
-    os.makedirs(CONFIG_DIR)
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    default_configs = os.path.join(ROOT_DIR, "configs")
+    if os.path.isdir(default_configs):
+        for cfg in os.listdir(default_configs):
+            src = os.path.join(default_configs, cfg)
+            dst = os.path.join(CONFIG_DIR, cfg)
+            if os.path.isfile(src):
+                shutil.copy2(src, dst)
 
 # Fix para imports
 os.chdir(ROOT_DIR)
