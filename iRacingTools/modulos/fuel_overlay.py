@@ -47,6 +47,7 @@ import os
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -1502,6 +1503,8 @@ class FuelOverlayApp(ctk.CTk):
 
         self._active_profile_key: Optional[str] = None
         self._pit_profile_has_data: bool = bool(self.config_data.get("pit", {}).get("has_calibration", False))
+        self._macro_lock = threading.Lock()
+        self._macro_last_send_t = 0.0
 
         # IRSDK
         self.ir = irsdk.IRSDK() if irsdk else None
@@ -1514,7 +1517,7 @@ class FuelOverlayApp(ctk.CTk):
         self.pit_cal = PitStopCalibrator()
 
         # macros
-        self.injector = self._build_injector_from_config()
+        self.injector = None
 
         # detached overlay windows (per section)
         self.detached_windows: Dict[str, ctk.CTkToplevel] = {}
@@ -1956,6 +1959,47 @@ class FuelOverlayApp(ctk.CTk):
 
         return False
 
+    def _send_chat_macro(self, text: str) -> bool:
+        """Enviar comando de chat seguindo as configs do overlay."""
+
+        if not text or keyboard is None:
+            return False
+
+        cfg = self.config_data.get("macro", {})
+
+        require_focus = bool(cfg.get("require_iracing_foreground", True))
+        win_sub = str(cfg.get("iracing_window_substring", "iracing") or "iracing")
+        if require_focus and not is_iracing_foreground(win_sub):
+            return False
+
+        debounce_ms = int(cfg.get("debounce_ms", 0) or 0)
+        now = time.monotonic()
+        if debounce_ms > 0 and (now - self._macro_last_send_t) * 1000.0 < debounce_ms:
+            return False
+
+        chat_key = str(cfg.get("chat_key", "t") or "t")
+        open_delay = float(cfg.get("open_delay", 0.02) or 0.02)
+        injection = str(cfg.get("injection", "type") or "type").lower()
+        typing_interval = float(cfg.get("typing_interval", 0.001) or 0.0)
+
+        try:
+            with self._macro_lock:
+                keyboard.send(chat_key)
+                time.sleep(max(0.0, open_delay))
+
+                if injection == "clipboard" and copy_to_clipboard(text):
+                    keyboard.send("ctrl+v")
+                    time.sleep(0.01)
+                else:
+                    keyboard.write(text, delay=max(0.0, typing_interval))
+
+                keyboard.send("enter")
+
+            self._macro_last_send_t = now
+            return True
+        except Exception:
+            return False
+
     def _dispatch_fuel_macro(
         self,
         fuel_add: float,
@@ -1985,7 +2029,7 @@ class FuelOverlayApp(ctk.CTk):
             cmd = str(tmpl).format_map(ctx)
         except Exception:
             cmd = f"#fuel {fuel_add_val:.2f}"
-        self.injector.send(cmd)
+        self._send_chat_macro(cmd)
 
     # ----------------------------
     # UI build
@@ -2591,6 +2635,12 @@ class FuelOverlayApp(ctk.CTk):
 
         self.entry_chatkey = self._settings_entry(sf, "Chat key:", self.config_data["macro"].get("chat_key", "t"), width=120)
 
+        ctk.CTkButton(
+            sf,
+            text="Testar macro de fuel",
+            command=self._on_test_macro_clicked,
+        ).pack(anchor="w", pady=(6, 0))
+
         # -------- Buttons
         btns = ctk.CTkFrame(sf, fg_color="transparent")
         btns.pack(fill="x", pady=(16, 0))
@@ -2759,6 +2809,16 @@ class FuelOverlayApp(ctk.CTk):
         self._pull_settings_into_config()
         self._apply_config_runtime()
         self._save_config()
+
+    def _on_test_macro_clicked(self) -> None:
+        """Testa o macro de fuel com um valor padrão."""
+
+        self._pull_settings_into_config()
+        macro_enabled = bool(self.config_data.get("macro", {}).get("enabled", False))
+        if not macro_enabled:
+            return
+
+        self._dispatch_fuel_macro(5.0, offset_laps=0, pit_loss_s=0.0, success_pct=0)
 
     def _pull_settings_into_config(self) -> None:
         # UI
@@ -2964,7 +3024,6 @@ class FuelOverlayApp(ctk.CTk):
         except Exception:
             pass
 
-        self.injector = self._build_injector_from_config()
         self._remove_hotkeys()
         self._setup_hotkeys()
 
