@@ -1572,6 +1572,7 @@ class FuelOverlayApp(ctk.CTk):
                 "always_on_top": True,
                 "borderless": True,
                 "drag_enabled": True,
+                "easy_mode": False,
                 "show_sections": {
                     "fuel": True,
                     "race": True,
@@ -1703,8 +1704,8 @@ class FuelOverlayApp(ctk.CTk):
         return dict(base)
 
     def _profile_key_from_session(self, session_info: Optional[Dict[str, Any]]) -> str:
-        track = "pista_desconhecida"
-        car = "carro_desconhecido"
+        track = "unknown_track"
+        car = "unknown_car"
 
         def _pick_track(data: Optional[Dict[str, Any]]):
             nonlocal track
@@ -1770,17 +1771,23 @@ class FuelOverlayApp(ctk.CTk):
             pass
 
         # Fallback to live telemetry dictionaries if session_info was missing/empty
-        if track == "pista_desconhecida":
+        if track == "unknown_track":
             try:
                 _pick_track(self._safe_get("WeekendInfo"))
             except Exception:
                 pass
 
-        if car == "carro_desconhecido":
+        if car == "unknown_car":
             try:
                 _pick_car(self._safe_get("DriverInfo"))
             except Exception:
                 pass
+
+        if track == "unknown_track":
+            track = "track_unknown"
+
+        if car == "unknown_car":
+            car = "car_unknown"
 
         return f"{car} @ {track}"
 
@@ -1822,7 +1829,7 @@ class FuelOverlayApp(ctk.CTk):
 
         self._active_profile_key = new_key
         try:
-            self.pit_profile_label.set(f"Perfil ativo: {new_key} (dados salvos por carro/pista)")
+            self.pit_profile_label.set(f"Active profile: {new_key} (data saved per car/track)")
         except Exception:
             pass
 
@@ -1992,7 +1999,7 @@ class FuelOverlayApp(ctk.CTk):
         self.tabs.pack(fill="both", expand=True)
 
         self.tab_overlay = self.tabs.add("Overlay")
-        self.tab_controls = self.tabs.add("Painel")
+        self.tab_controls = self.tabs.add("Controls")
         self.tab_settings = self.tabs.add("Settings")
 
         self._build_overlay_tab()
@@ -2049,6 +2056,11 @@ class FuelOverlayApp(ctk.CTk):
         self.lbl_pit = ctk.CTkLabel(self.sec_pit, textvariable=self.var_pit, anchor="w", font=("Consolas", 11), justify="left")
         self.lbl_pit.pack(fill="x", padx=8, pady=(6, 6))
         self._register_section_label("pit", self.var_pit, ("Consolas", 11), padx=8, pady=(6, 6), justify="left")
+        self._pit_label_default_color = None
+        try:
+            self._pit_label_default_color = self.lbl_pit.cget("text_color")
+        except Exception:
+            pass
 
         # Weather
         self.var_weather = ctk.StringVar(value="Weather: --")
@@ -2092,7 +2104,7 @@ class FuelOverlayApp(ctk.CTk):
         self.lbl_title.pack(anchor="w")
         self.lbl_subtitle = ctk.CTkLabel(
             title_box,
-            text="Pit timing, fuel math e macros em um painel compacto",
+            text="Pit timing, fuel math, and macros in a compact panel",
             font=("Segoe UI", 11),
             anchor="w",
         )
@@ -2106,7 +2118,7 @@ class FuelOverlayApp(ctk.CTk):
 
         self.btn_save = ctk.CTkButton(
             btn_box,
-            text="💾 Salvar layout",
+            text="💾 Save layout",
             width=130,
             fg_color=("#1f6aa5", "#1f6aa5"),
             hover_color=("#1b5c8c", "#1b5c8c"),
@@ -2372,6 +2384,13 @@ class FuelOverlayApp(ctk.CTk):
         self.var_drag = ctk.BooleanVar(value=bool(self.config_data["ui"].get("drag_enabled", True)))
         ctk.CTkCheckBox(sf, text="Enable drag to move", variable=self.var_drag).pack(anchor="w")
 
+        self.var_easy_mode = ctk.BooleanVar(value=bool(self.config_data["ui"].get("easy_mode", False)))
+        ctk.CTkCheckBox(
+            sf,
+            text="Easy mode overlay (simplified information)",
+            variable=self.var_easy_mode,
+        ).pack(anchor="w")
+
         row_refresh = ctk.CTkFrame(sf, fg_color="transparent")
         row_refresh.pack(fill="x", pady=(6, 2))
         ctk.CTkLabel(row_refresh, text="Refresh (ms):", width=120, anchor="w").pack(side="left")
@@ -2470,7 +2489,7 @@ class FuelOverlayApp(ctk.CTk):
         self.var_tires_with_fuel = ctk.BooleanVar(value=bool(self.config_data["pit"].get("tires_with_fuel", False)))
         ctk.CTkCheckBox(
             sf,
-            text="Série abastece e troca pneus juntos (sem tempo extra de pneus)",
+            text="Series fuels and changes tires together (no extra tire time)",
             variable=self.var_tires_with_fuel,
             command=self._refresh_pit_entry_state,
         ).pack(anchor="w")
@@ -2507,7 +2526,7 @@ class FuelOverlayApp(ctk.CTk):
         self.var_pit_advanced = ctk.BooleanVar(value=bool(self.config_data["pit"].get("advanced_editing", False)))
         ctk.CTkCheckBox(
             sf,
-            text="Usuário avançado: permitir editar tempos do pit",
+            text="Advanced user: allow editing pit timings",
             variable=self.var_pit_advanced,
             command=self._refresh_pit_entry_state,
         ).pack(anchor="w", pady=(0, 4))
@@ -2516,7 +2535,7 @@ class FuelOverlayApp(ctk.CTk):
         self.entry_pit_fill = self._settings_entry(sf, "Fill rate (u/s):", self.config_data["pit"].get("fuel_fill_rate", ""))
         self.entry_pit_tires = self._settings_entry(
             sf,
-            "Tempo de pneus (s):",
+            "Tire time (s):",
             self.config_data["pit"].get("tire_service_time_s", ""),
         )
 
@@ -2637,16 +2656,16 @@ class FuelOverlayApp(ctk.CTk):
         if fill_rate is not None:
             pieces.append(f"fill={fill_rate:.2f}u/s")
         if tire_time is not None:
-            pieces.append(f"pneus={tire_time:.1f}s")
+            pieces.append(f"tires={tire_time:.1f}s")
         if tires_with_fuel:
-            pieces.append("pneus junto com fuel")
+            pieces.append("tires with fuel")
 
         if self._pit_profile_has_data:
-            summary = "Tempos do pit (carro/pista): " + (" | ".join(pieces) if pieces else "--")
-            info = "Valores informativos usados para cálculo; edite só no modo avançado se necessário."
+            summary = "Pit timings (car/track): " + (" | ".join(pieces) if pieces else "--")
+            info = "Informational values used for calculations; edit in advanced mode only if necessary."
         else:
-            summary = "Tempos do pit: aguardando primeira calibração para este carro/pista."
-            info = "Faça um pitstop de teste para gravar tempos ou ative o modo avançado para preencher manualmente."
+            summary = "Pit timings: waiting for the first calibration for this car/track."
+            info = "Complete a test pit stop to record timings or enable advanced mode to fill them manually."
 
         try:
             self.pit_model_summary.set(summary)
@@ -2685,6 +2704,12 @@ class FuelOverlayApp(ctk.CTk):
                     w.pack(fill="x", pady=(0, 10))
                 except Exception:
                     pass
+
+    def _easy_mode_enabled(self) -> bool:
+        try:
+            return bool(self.config_data.get("ui", {}).get("easy_mode", False))
+        except Exception:
+            return False
 
     # ----------------------------
     # UI callbacks
@@ -2740,6 +2765,7 @@ class FuelOverlayApp(ctk.CTk):
         self.config_data["ui"]["always_on_top"] = bool(self.var_topmost.get())
         self.config_data["ui"]["borderless"] = bool(self.var_borderless.get())
         self.config_data["ui"]["drag_enabled"] = bool(self.var_drag.get())
+        self.config_data["ui"]["easy_mode"] = bool(self.var_easy_mode.get())
         try:
             self.config_data["ui"]["refresh_ms"] = int(float(self.entry_refresh.get()))
         except Exception:
@@ -2885,6 +2911,11 @@ class FuelOverlayApp(ctk.CTk):
         self._drag_enabled = bool(self.config_data["ui"].get("drag_enabled", True))
 
         self.history.ignore_yellow = bool(self.config_data["fuel"].get("ignore_yellow", True))
+
+        try:
+            self.var_easy_mode.set(bool(self.config_data["ui"].get("easy_mode", False)))
+        except Exception:
+            pass
 
         # sync overlay quick controls with config
         try:
@@ -3556,31 +3587,52 @@ class FuelOverlayApp(ctk.CTk):
 
             self.lbl_status.configure(text=f"iRacing: {conn} ({status}){pits_open_s} | samples={len(self.history.samples)}", text_color=status_color)
 
+            easy_mode = self._easy_mode_enabled()
             need_line = "Need: --"
             need_color = "#f5c542"
-            if burn is None or burn <= 0 or laps_possible is None:
-                proj = self.history.projected_burn()
-                proj_s = "" if proj is None else f" (proj {proj:.3f}/lap)"
-                self.var_fuel.set(f"Burn: collecting{proj_s} | Fuel: {fuel:.2f}")
-                self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
-            else:
-                self.var_fuel.set(f"Burn: {burn:.3f}/lap | Fuel: {fuel:.2f} | Can: {laps_possible:.1f} laps")
+            if easy_mode:
+                burn_s = "collecting" if burn is None or burn <= 0 else f"{burn:.3f}/lap"
+                fuel_left_s = f"{fuel:.2f}"
+                add_s = "--" if fuel_to_add is None else f"{fuel_to_add:.2f}"
+                self.var_fuel.set(f"Fuel: {burn_s} | Left: {fuel_left_s} | Add: {add_s}")
+
+                laps_rem_s = "--" if laps_remain is None else f"{laps_remain:.1f}"
+                self.var_race.set(f"Laps remaining: {laps_rem_s}")
+
                 if fuel_need_total is not None and fuel_to_add is not None:
-                    rem_s = "--" if laps_remain is None else f"{laps_remain:.1f}"
-                    left_s = "--" if finish_leftover is None else f"{finish_leftover:.2f}"
-                    plan_s = (fuel_plan_mode or "finish").upper()
-                    need_line = f"NEED {fuel_need_total:.2f} | Fuel agora {fuel:.2f}"
                     if fuel >= fuel_need_total:
-                        need_line = need_line + " | SEM PARADA (fuel > need)"
+                        leftover_s = "" if finish_leftover is None else f" ({finish_leftover:.2f} spare)"
+                        need_line = f"Fuel ok to finish{leftover_s}".strip()
                         need_color = "#3ddc84"
                     else:
-                        need_line = need_line + " | Pit necessário"
+                        need_line = f"Add {fuel_to_add:.2f} to reach target"
                         need_color = "#ff8c42"
-                    self.var_race.set(
-                        f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={fuel_need_total:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
-                    )
                 else:
+                    need_line = "Fuel data not ready yet"
+            else:
+                if burn is None or burn <= 0 or laps_possible is None:
+                    proj = self.history.projected_burn()
+                    proj_s = "" if proj is None else f" (proj {proj:.3f}/lap)"
+                    self.var_fuel.set(f"Burn: collecting{proj_s} | Fuel: {fuel:.2f}")
                     self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
+                else:
+                    self.var_fuel.set(f"Burn: {burn:.3f}/lap | Fuel: {fuel:.2f} | Can: {laps_possible:.1f} laps")
+                    if fuel_need_total is not None and fuel_to_add is not None:
+                        rem_s = "--" if laps_remain is None else f"{laps_remain:.1f}"
+                        left_s = "--" if finish_leftover is None else f"{finish_leftover:.2f}"
+                        plan_s = (fuel_plan_mode or "finish").upper()
+                        need_line = f"NEED {fuel_need_total:.2f} | Fuel now {fuel:.2f}"
+                        if fuel >= fuel_need_total:
+                            need_line = need_line + " | NO STOP (fuel > need)"
+                            need_color = "#3ddc84"
+                        else:
+                            need_line = need_line + " | Pit needed"
+                            need_color = "#ff8c42"
+                        self.var_race.set(
+                            f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={fuel_need_total:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
+                        )
+                    else:
+                        self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
 
             try:
                 self.var_need_callout.set(need_line)
@@ -3588,10 +3640,14 @@ class FuelOverlayApp(ctk.CTk):
             except Exception:
                 pass
 
-            self.var_weather.set(self._format_weather_line(track_temp, declared_wet, wet_action, wet_conf, wet_details))
+            self.var_weather.set(
+                self._format_weather_line(track_temp, declared_wet, wet_action, wet_conf, wet_details, easy_mode=easy_mode)
+            )
             self.var_risk.set(f"Risk: {risk_score:3d} | {risk_reason}")
 
-            self.var_pit.set(self._format_pit_options(opts, pit_base, fill_rate, tire_time, tires_with_fuel))
+            self.var_pit.set(
+                self._format_pit_options(opts, pit_base, fill_rate, tire_time, tires_with_fuel, easy_mode=easy_mode)
+            )
 
             hk = self.config_data.get("hotkeys", {})
             self.var_hotkeys.set(
@@ -3704,7 +3760,48 @@ class FuelOverlayApp(ctk.CTk):
 
         return None
 
-    def _format_weather_line(self, track_temp, declared_wet, action: str, conf: int, details: Dict[str, Any]) -> str:
+    @staticmethod
+    def _wet_level_from_fraction(wet: Optional[float]) -> str:
+        if wet is None:
+            return "Unknown"
+        try:
+            w = float(wet)
+        except Exception:
+            return "Unknown"
+
+        if w < 0.05:
+            return "Dry"
+        if w < 0.15:
+            return "Mostly dry"
+        if w < 0.35:
+            return "Damp"
+        if w < 0.6:
+            return "Mixed"
+        if w < 0.8:
+            return "Wet"
+        return "Very wet"
+
+    def _set_pit_label_color(self, color: Optional[str]) -> None:
+        try:
+            if color is None:
+                if self._pit_label_default_color is None:
+                    return
+                self.lbl_pit.configure(text_color=self._pit_label_default_color)
+            else:
+                self.lbl_pit.configure(text_color=color)
+        except Exception:
+            pass
+
+    def _format_weather_line(
+        self,
+        track_temp,
+        declared_wet,
+        action: str,
+        conf: int,
+        details: Dict[str, Any],
+        *,
+        easy_mode: bool = False,
+    ) -> str:
         # usamos wet_eff (corrigido) se existir, senão o wet bruto
         wet = details.get("wet_eff")
         if wet is None:
@@ -3716,6 +3813,14 @@ class FuelOverlayApp(ctk.CTk):
         trend = details.get("trend")
         wet_label = details.get("wet_label")
         wet_raw = details.get("wet_raw")
+
+        if easy_mode:
+            wet_pct = "--%" if wet is None else f"{wet*100:3.0f}%"
+            level = wet_label or self._wet_level_from_fraction(wet)
+            status = "CHANGE TO WETS" if action == "PIT WETS" else "STAY SLICKS"
+            confidence = f" ({conf}% confidence)" if conf is not None else ""
+            level_text = level or "Unknown wetness"
+            return f"{status} | Track: {level_text} ({wet_pct}){confidence}"
 
         wet_s = "--" if wet is None else f"{wet*100:3.0f}%"
         if wet_label:
@@ -3732,8 +3837,31 @@ class FuelOverlayApp(ctk.CTk):
         return f"Wet={wet_s}{tr_s} Precip={prec_s} DeclWet={dw} TrackT={temp_s} | Grip~{grip_s} Aqua={aqua} | {action} ({conf}%)"
 
     def _format_pit_options(
-        self, opts: List[PitOption], pit_base: float, fill_rate: float, tire_time: float, tires_with_fuel: bool = False
+        self,
+        opts: List[PitOption],
+        pit_base: float,
+        fill_rate: float,
+        tire_time: float,
+        tires_with_fuel: bool = False,
+        *,
+        easy_mode: bool = False,
     ) -> str:
+        if easy_mode:
+            if not opts:
+                self._set_pit_label_color(None)
+                return "Pit: data unavailable"
+
+            best = opts[0]
+            add_s = "" if best.fuel_add is None else f" | Add {best.fuel_add:.1f}"
+            if best.offset_laps == 0:
+                self._set_pit_label_color("#3ddc84")
+                return f"Good time to pit now{add_s}"
+
+            delay_s = f"+{best.offset_laps} laps" if best.offset_laps is not None else "later"
+            self._set_pit_label_color("#ff5c5c")
+            return f"Do not pit now (better in {delay_s}){add_s}"
+
+        self._set_pit_label_color(None)
         if not opts:
             return "Pit: -- (need avg lap time + traffic data)"
 
