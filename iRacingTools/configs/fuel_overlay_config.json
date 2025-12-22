@@ -36,7 +36,7 @@
         "iracing_window_substring": "iracing",
         "debounce_ms": 250,
         "templates": {
-            "apply_plan": "#fuel {fuel_add:.2f}",
+            "apply_plan": "!fuel {fuel_add:.2f}",
             "wet_preset": "",
             "slick_preset": ""
         }

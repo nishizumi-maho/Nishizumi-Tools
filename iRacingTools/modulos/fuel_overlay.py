@@ -1487,7 +1487,7 @@ class FuelOverlayApp(ctk.CTk):
         "full": "Fill to full tank",
     }
 
-    DEFAULT_APPLY_MACRO = "#fuel {fuel_add:.2f}$"
+    DEFAULT_APPLY_MACRO = "!fuel {fuel_add:.2f}$"
     PIT_CAL_KEYS = ("pit_base_loss_s", "fuel_fill_rate", "tire_service_time_s", "tires_with_fuel")
     PIT_PROFILE_META_KEYS = ("has_calibration",)
     PIT_PROFILE_KEYS = PIT_CAL_KEYS + PIT_PROFILE_META_KEYS
@@ -1924,6 +1924,16 @@ class FuelOverlayApp(ctk.CTk):
         )
         if not tmpl:
             tmpl = self.DEFAULT_APPLY_MACRO
+
+        # Backward compatibility: older configs used "#fuel", which iRacing
+        # no longer accepts. Automatically upgrade to the "!fuel" variant
+        # while keeping any user customizations intact.
+        if str(tmpl).strip().startswith("#fuel"):
+            tmpl = str(tmpl).replace("#fuel", "!fuel", 1)
+            try:
+                macro_cfg.setdefault("templates", {})["apply_plan"] = tmpl
+            except Exception:
+                pass
         if not str(tmpl).endswith("$"):
             tmpl = str(tmpl) + "$"
         return str(tmpl)
