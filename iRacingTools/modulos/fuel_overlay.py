@@ -895,6 +895,9 @@ class RiskRadar:
         self.steer_hist = RollingWindow(60)
         self.brake_hist = RollingWindow(60)
         self.last_beep_t = 0.0
+        self.last_risk = 0
+        self.last_reason = "OK"
+        self.last_update_t = 0.0
 
     @staticmethod
     def _wrap_delta_pct(dp: float) -> float:
@@ -938,6 +941,14 @@ class RiskRadar:
                     tlen = 5000.0
         except Exception:
             return 0, "(no traffic data)"
+
+        # Housekeeping: clear stale distance records so closing speed remains reliable
+        stale_cutoff = now - 10.0
+        for car_id, (_, t) in list(self.prev_dist_m.items()):
+            if t < stale_cutoff:
+                self.prev_dist_m.pop(car_id, None)
+
+        valid_samples = 0
 
         braking = False
         try:
@@ -988,7 +999,11 @@ class RiskRadar:
                 else:
                     closing = (prev_dist - dist_m) / dt
 
+                # Prevent runaway values caused by sporadic packets or teleports
+                closing = max(-25.0, min(25.0, closing))
+
             self.prev_dist_m[i] = (dist_m, now)
+            valid_samples += 1
 
             d = abs(dist_m)
 
@@ -1047,8 +1062,31 @@ class RiskRadar:
         if instability > 0.7:
             reasons.append("instability")
 
+        reason_text = "OK" if not reasons else "; ".join(reasons[:3])
         risk_i = int(max(0, min(100, round(risk))))
-        return risk_i, ("OK" if not reasons else "; ".join(reasons[:3]))
+
+        # Apply light smoothing to avoid jitter and false positives when data is noisy
+        smoothed = risk_i
+        if self.last_update_t > 0.0:
+            alpha = 0.35
+            smoothed = int(round(self.last_risk * (1 - alpha) + risk_i * alpha))
+
+            # when data drops out, decay gradually instead of snapping to zero
+            if risk_i < self.last_risk:
+                smoothed = max(risk_i, self.last_risk - 5)
+
+            # preserve the last meaningful reason while smoothing down
+            if reason_text == "OK" and self.last_reason != "OK" and smoothed > 0:
+                reason_text = self.last_reason
+
+        if valid_samples == 0 and reason_text == "OK":
+            reason_text = "limited traffic data"
+
+        self.last_risk = smoothed
+        self.last_reason = reason_text
+        self.last_update_t = now
+
+        return smoothed, reason_text
 
 
 # ============================================================
