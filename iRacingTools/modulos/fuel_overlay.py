@@ -3598,7 +3598,8 @@ class FuelOverlayApp(ctk.CTk):
                         rem_s = "--" if laps_remain is None else f"{laps_remain:.1f}"
                         left_s = "--" if finish_leftover is None else f"{finish_leftover:.2f}"
                         plan_s = (fuel_plan_mode or "finish").upper()
-                        need_line = f"NEED {fuel_need_total:.2f} | Fuel now {fuel:.2f}"
+                        need_amount = fuel_missing_total if fuel_missing_total is not None else fuel_need_total
+                        need_line = f"NEED {need_amount:.2f} | Fuel now {fuel:.2f}"
                         if fuel >= fuel_need_total:
                             need_line = need_line + " | NO STOP (fuel > need)"
                             need_color = "#3ddc84"
@@ -3606,7 +3607,7 @@ class FuelOverlayApp(ctk.CTk):
                             need_line = need_line + " | Pit needed"
                             need_color = "#ff8c42"
                         self.var_race.set(
-                            f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={fuel_need_total:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
+                            f"Race: RemLaps={rem_s} | Plan={plan_s} | Need={need_amount:.2f} | Add={fuel_to_add:.2f} | Left={left_s} | Margin={margin:.1f}L"
                         )
                     else:
                         self.var_race.set("Race: RemLaps=-- | Need=-- | Add=--")
