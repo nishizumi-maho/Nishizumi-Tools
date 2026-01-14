@@ -2,36 +2,22 @@
 
 from __future__ import annotations
 
-import ctypes
 import importlib.util
 import json
 import logging
 import os
 import sys
-import threading
 import time
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import messagebox, ttk
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 IRSDKSpec = importlib.util.find_spec("irsdk")
 if IRSDKSpec:
     import irsdk
 else:
     irsdk = None
-
-KEYBOARD_SPEC = importlib.util.find_spec("keyboard")
-if KEYBOARD_SPEC:
-    import keyboard
-else:
-    keyboard = None
-
-PYGAME_SPEC = importlib.util.find_spec("pygame")
-if PYGAME_SPEC:
-    import pygame
-else:
-    pygame = None
 
 APP_NAME = "Turbo Pit"
 APP_FOLDER = "TurboPit"
@@ -70,11 +56,6 @@ DEFAULT_ACTIONS: List[PitAction] = [
         ),
     )
 ]
-
-DEFAULT_HOTKEYS = {
-    TOGGLE_ACTION_KEY: "KEY:CTRL+SHIFT+G",
-}
-
 
 class TurboPit:
     def __init__(self) -> None:
@@ -179,162 +160,18 @@ class TurboPit:
         return None
 
 
-class InputManager:
-    """
-    Manage keyboard and joystick input.
-
-    - Keyboard input uses the optional `keyboard` library.
-    - Joystick input uses pygame when available.
-    - Safe mode disables joystick polling (keyboard only).
-    """
-
-    def __init__(self, *, safe_mode: bool = False) -> None:
-        self.safe_mode = safe_mode
-        self.joysticks: List["pygame.joystick.Joystick"] = []
-        self.listeners: Dict[str, Callable[[], None]] = {}
-        self._input_thread: Optional[threading.Thread] = None
-        self._running = False
-
-        if self._pygame_available():
-            self._init_pygame()
-            self._start_input_loop()
-
-    def _pygame_available(self) -> bool:
-        return pygame is not None
-
-    def _init_pygame(self) -> None:
-        if not self._pygame_available():
-            return
-        if not pygame.get_init():
-            pygame.init()
-        if not pygame.joystick.get_init():
-            pygame.joystick.init()
-        self.refresh_joysticks()
-
-    def refresh_joysticks(self) -> None:
-        self.joysticks.clear()
-        if not self._pygame_available() or self.safe_mode:
-            return
-        try:
-            if not pygame.get_init():
-                pygame.init()
-            if not pygame.joystick.get_init():
-                pygame.joystick.init()
-            for idx in range(pygame.joystick.get_count()):
-                joy = pygame.joystick.Joystick(idx)
-                if not joy.get_init():
-                    joy.init()
-                self.joysticks.append(joy)
-        except Exception:
-            self.joysticks.clear()
-
-    def set_safe_mode(self, enabled: bool) -> None:
-        self.safe_mode = enabled
-        if enabled:
-            self.joysticks.clear()
-        else:
-            self._init_pygame()
-        if not self._running and self._pygame_available():
-            self._start_input_loop()
-
-    def register_listener(self, code: str, callback: Callable[[], None]) -> None:
-        self.listeners[code] = callback
-
-    def clear_listeners(self) -> None:
-        self.listeners.clear()
-
-    def _start_input_loop(self) -> None:
-        if not self._pygame_available():
-            return
-        if self._input_thread and self._input_thread.is_alive():
-            return
-        self._running = True
-        self._input_thread = threading.Thread(target=self._input_loop, daemon=True)
-        self._input_thread.start()
-
-    def _input_loop(self) -> None:
-        while self._running:
-            if not self.safe_mode and self._pygame_available() and pygame.get_init():
-                try:
-                    pygame.event.pump()
-                    for event in pygame.event.get():
-                        if event.type == pygame.JOYBUTTONDOWN:
-                            code = f"JOY:{event.joy}:{event.button}"
-                            if code in self.listeners:
-                                threading.Thread(
-                                    target=self.listeners[code], daemon=True
-                                ).start()
-                except Exception:
-                    pass
-            time.sleep(0.01)
-
-    def capture_any_input(self, timeout: float = 10.0) -> Optional[str]:
-        captured_code: Optional[str] = None
-        start = time.time()
-
-        def key_hook(event: "keyboard.KeyboardEvent") -> None:
-            nonlocal captured_code
-            if event.event_type == "down":
-                if event.name == "esc":
-                    captured_code = "CANCEL"
-                elif event.name:
-                    captured_code = f"KEY:{event.name.upper()}"
-
-        hook = None
-        if keyboard is not None:
-            hook = keyboard.hook(key_hook)
-
-        try:
-            while time.time() - start < timeout:
-                if captured_code:
-                    break
-
-                if not self.safe_mode and self._pygame_available() and pygame.get_init():
-                    try:
-                        pygame.event.pump()
-                        for joy in self.joysticks:
-                            for b_idx in range(joy.get_numbuttons()):
-                                if joy.get_button(b_idx):
-                                    captured_code = f"JOY:{joy.get_id()}:{b_idx}"
-                                    break
-                            if captured_code:
-                                break
-                    except Exception:
-                        pass
-
-                if captured_code:
-                    break
-
-                time.sleep(0.02)
-        finally:
-            if hook is not None:
-                keyboard.unhook(hook)
-
-        return captured_code
-
-
 class TurboPitApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_NAME)
         self.pit = TurboPit()
-        self.input_manager = InputManager()
         self.actions: List[PitAction] = []
-        self.hotkeys: Dict[str, str] = {}
-        self.safe_mode = False
         self.auto_clear_on_pitroad = False
-        self._keyboard_hotkeys: Dict[str, int] = {}
-        self._tk_hotkeys: Dict[str, str] = {}
-        self._win_hotkeys: Dict[str, int] = {}
-        self._win_hotkey_callbacks: Dict[int, Callable[[], None]] = {}
-        self._win_hotkey_next_id = 1
-        self._win_hotkey_polling = False
         self._last_on_pit_road = False
         self._toggle_clear_next = True
 
         self._load_config()
         self._build_ui()
-        self._apply_hotkeys()
         self._refresh_status()
 
     def _load_config(self) -> None:
@@ -348,20 +185,13 @@ class TurboPitApp:
             except Exception:
                 logging.exception("Failed to load config, using defaults.")
 
-        self.safe_mode = bool(config.get("safe_mode", False))
         self.auto_clear_on_pitroad = bool(config.get("auto_clear_on_pitroad", False))
         raw_actions = config.get("actions") or []
         parsed_actions = [action for action in self._parse_actions(raw_actions) if action.key == TOGGLE_ACTION_KEY]
         self.actions = parsed_actions or DEFAULT_ACTIONS
-        self.hotkeys = {
-            action.key: config.get("hotkeys", {}).get(action.key, DEFAULT_HOTKEYS.get(action.key, ""))
-            for action in self.actions
-        }
-        self.input_manager.set_safe_mode(self.safe_mode)
 
     def _default_config(self) -> Dict[str, object]:
         return {
-            "safe_mode": False,
             "auto_clear_on_pitroad": False,
             "actions": [
                 {
@@ -371,7 +201,6 @@ class TurboPitApp:
                 }
                 for action in DEFAULT_ACTIONS
             ],
-            "hotkeys": DEFAULT_HOTKEYS,
         }
 
     def _parse_actions(self, raw_actions: Iterable[object]) -> List[PitAction]:
@@ -399,7 +228,6 @@ class TurboPitApp:
 
     def _save_config(self) -> None:
         payload = {
-            "safe_mode": self.safe_mode,
             "auto_clear_on_pitroad": self.auto_clear_on_pitroad,
             "actions": [
                 {
@@ -409,7 +237,6 @@ class TurboPitApp:
                 }
                 for action in self.actions
             ],
-            "hotkeys": self.hotkeys,
         }
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as handle:
@@ -457,26 +284,12 @@ class TurboPitApp:
         button_frame = ttk.Frame(self.main_frame)
         button_frame.pack(fill=tk.X, padx=12, pady=8)
 
-        ttk.Button(button_frame, text="Assign Hotkey", command=self._assign_hotkey).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(button_frame, text="Clear Hotkey", command=self._clear_hotkey).pack(
-            side=tk.LEFT, padx=4
-        )
         ttk.Button(button_frame, text="Open Config Folder", command=self._open_config).pack(
             side=tk.LEFT, padx=4
         )
 
-        options_frame = ttk.LabelFrame(self.main_frame, text="Input Options")
+        options_frame = ttk.LabelFrame(self.main_frame, text="Options")
         options_frame.pack(fill=tk.X, padx=12, pady=8)
-
-        self.safe_mode_var = tk.BooleanVar(value=self.safe_mode)
-        ttk.Checkbutton(
-            options_frame,
-            text="Keyboard-only mode (disable controllers)",
-            variable=self.safe_mode_var,
-            command=self._toggle_safe_mode,
-        ).pack(side=tk.LEFT, padx=6, pady=4)
 
         self.auto_clear_var = tk.BooleanVar(value=self.auto_clear_on_pitroad)
         ttk.Checkbutton(
@@ -486,17 +299,13 @@ class TurboPitApp:
             command=self._toggle_auto_clear_on_pitroad,
         ).pack(side=tk.LEFT, padx=6, pady=4)
 
-        self.input_status_var = tk.StringVar(value=self._input_status_text())
-        ttk.Label(options_frame, textvariable=self.input_status_var).pack(side=tk.RIGHT, padx=6)
-
         info_frame = ttk.LabelFrame(self.main_frame, text="Quick Help")
         info_frame.pack(fill=tk.X, padx=12, pady=8)
 
         info_label = ttk.Label(
             info_frame,
             text=(
-                "Use the Toggle button or assign a hotkey. "
-                "Hotkey capture supports keyboard and pygame controllers."
+                "Use the Toggle button to quickly clear or re-enable tires + windshield."
             ),
             wraplength=760,
             justify=tk.LEFT,
@@ -504,13 +313,6 @@ class TurboPitApp:
         info_label.pack(anchor=tk.W, padx=8, pady=6)
 
         self._build_documentation()
-
-    def _input_status_text(self) -> str:
-        keyboard_status = "OK" if keyboard is not None else "Not installed"
-        controller_status = (
-            f"{len(self.input_manager.joysticks)} controller(s)" if pygame is not None else "pygame missing"
-        )
-        return f"Keyboard: {keyboard_status} | Controllers: {controller_status}"
 
     def _build_documentation(self) -> None:
         doc_text = tk.Text(self.doc_frame, wrap=tk.WORD)
@@ -549,25 +351,10 @@ Turbo Pit uses these commands internally:
 - {COMMAND_CLEAR_TIRES} -> Uncheck tire changes
 - {COMMAND_CLEAR_WS} -> Uncheck clean windshield
 
-HOTKEY FORMATS
---------------
-Hotkeys live in the "hotkeys" section of the config file or can be assigned in the UI.
-Use one of these formats:
-- Keyboard: KEY:CTRL+SHIFT+F
-- Keyboard: KEY:ALT+1
-- Controller: JOY:<device_id>:<button>
-
-The Assign Hotkey button waits for input from:
-- Keyboard (via the "keyboard" Python library)
-- Controllers (via pygame/SDL)
-On Windows, global hotkeys are registered so the trigger works even when the app
-does not have focus. If the keyboard library cannot register a hotkey, the app
-falls back to the Windows global hotkey API.
-
-KEYBOARD-ONLY MODE
-------------------
-Toggle "Keyboard-only mode" to stop using controller input. This is useful if
-pygame is installed but you do not want the app to capture joystick buttons.
+HOTKEYS
+-------
+Turbo Pit no longer uses hotkeys or controller input. Use the on-screen Toggle
+button to activate tire + windshield changes.
 
 AUTO-CLEAR ON PIT ROAD
 ----------------------
@@ -581,15 +368,12 @@ press, then re-enables them on the next press.
 
 TIPS
 ----
-- If a hotkey does not trigger, verify the format and that the dependency
-  (keyboard or pygame) is installed.
-- The built-in Tkinter hotkey binding works while the app is focused.
+- Use the Toggle button to quickly clear or re-enable tire and windshield service.
 """
 
     def _refresh_status(self) -> None:
         connected = self.pit.is_connected() or self.pit.connect()
         self.status_var.set("Connected" if connected else "Disconnected")
-        self.input_status_var.set(self._input_status_text())
         self._maybe_auto_clear_on_pitroad()
         self.root.after(1000, self._refresh_status)
 
@@ -600,71 +384,10 @@ TIPS
         for command, value in action.commands:
             self.pit.send_pit_command(command, value)
 
-    def _assign_hotkey(self) -> None:
-        if keyboard is None and pygame is None:
-            messagebox.showwarning(
-                APP_NAME,
-                "Neither keyboard nor pygame is installed. Hotkey capture is unavailable.",
-            )
-            return
-        action = self._toggle_action()
-        if action is None:
-            return
-
-        capture_window = tk.Toplevel(self.root)
-        capture_window.title("Assign Hotkey")
-        capture_window.geometry("420x140")
-        capture_window.transient(self.root)
-        ttk.Label(
-            capture_window,
-            text="Press a key or controller button (ESC to cancel)...",
-        ).pack(pady=16)
-        status_var = tk.StringVar(value="Waiting for input...")
-        ttk.Label(capture_window, textvariable=status_var).pack()
-
-        def capture() -> None:
-            code = self.input_manager.capture_any_input(timeout=10.0)
-            self.root.after(0, lambda: self._finish_capture(capture_window, status_var, action, code))
-
-        threading.Thread(target=capture, daemon=True).start()
-
-    def _finish_capture(
-        self,
-        window: tk.Toplevel,
-        status_var: tk.StringVar,
-        action: PitAction,
-        code: Optional[str],
-    ) -> None:
-        if code in {None, "CANCEL"}:
-            status_var.set("Capture canceled or timed out.")
-            window.after(800, window.destroy)
-            return
-        self.hotkeys[action.key] = code
-        self._apply_hotkeys()
-        self._save_config()
-        status_var.set(f"Assigned: {code}")
-        window.after(800, window.destroy)
-
-    def _clear_hotkey(self) -> None:
-        action = self._toggle_action()
-        if action is None:
-            return
-        self.hotkeys[action.key] = ""
-        self._apply_hotkeys()
-        self._save_config()
-
     def _reload_config(self) -> None:
         self._load_config()
-        self._apply_hotkeys()
-        self.safe_mode_var.set(self.safe_mode)
         self.auto_clear_var.set(self.auto_clear_on_pitroad)
         messagebox.showinfo(APP_NAME, "Configuration reloaded.")
-
-    def _toggle_safe_mode(self) -> None:
-        self.safe_mode = bool(self.safe_mode_var.get())
-        self.input_manager.set_safe_mode(self.safe_mode)
-        self._save_config()
-        self.input_status_var.set(self._input_status_text())
 
     def _toggle_auto_clear_on_pitroad(self) -> None:
         self.auto_clear_on_pitroad = bool(self.auto_clear_var.get())
@@ -688,191 +411,6 @@ TIPS
     def _toggle_action(self) -> Optional[PitAction]:
         return self._find_action(TOGGLE_ACTION_KEY)
 
-    def _apply_hotkeys(self) -> None:
-        for handle in self._keyboard_hotkeys.values():
-            if keyboard is not None:
-                keyboard.remove_hotkey(handle)
-        self._keyboard_hotkeys.clear()
-        self.input_manager.clear_listeners()
-        for seq in self._tk_hotkeys.values():
-            self.root.unbind_all(seq)
-        self._tk_hotkeys.clear()
-        self._clear_windows_hotkeys()
-
-        for action in self.actions:
-            binding = self.hotkeys.get(action.key, "")
-            if not binding:
-                continue
-            if binding.startswith("KEY:"):
-                key_combo = binding.replace("KEY:", "").strip()
-                if not key_combo:
-                    continue
-                handle = None
-                if keyboard is not None:
-                    try:
-                        handle = keyboard.add_hotkey(
-                            key_combo.lower(),
-                            lambda action=action: self._send_action(action),
-                        )
-                    except Exception:
-                        logging.exception("Failed to register keyboard hotkey: %s", key_combo)
-                if handle is not None:
-                    self._keyboard_hotkeys[action.key] = handle
-                elif self._register_windows_hotkey(
-                    key_combo, lambda action=action: self._send_action(action)
-                ):
-                    self._win_hotkeys[action.key] = self._win_hotkey_next_id - 1
-                tk_binding = self._tk_binding_for_combo(key_combo)
-                if tk_binding:
-                    self.root.bind_all(
-                        tk_binding,
-                        lambda _event, action=action: self._send_action(action),
-                    )
-                    self._tk_hotkeys[action.key] = tk_binding
-            elif binding.startswith("JOY:"):
-                self.input_manager.register_listener(
-                    binding,
-                    lambda action=action: self._send_action(action),
-                )
-
-    def _register_windows_hotkey(self, combo: str, callback: Callable[[], None]) -> bool:
-        if os.name != "nt":
-            return False
-        parsed = self._parse_windows_hotkey(combo)
-        if parsed is None:
-            return False
-        modifiers, key_code = parsed
-        hwnd = self.root.winfo_id()
-        hotkey_id = self._win_hotkey_next_id
-        self._win_hotkey_next_id += 1
-        user32 = ctypes.windll.user32
-        if not user32.RegisterHotKey(hwnd, hotkey_id, modifiers, key_code):
-            logging.warning("Unable to register Windows hotkey: %s", combo)
-            return False
-        self._win_hotkey_callbacks[hotkey_id] = callback
-        self._start_windows_hotkey_polling()
-        return True
-
-    def _start_windows_hotkey_polling(self) -> None:
-        if os.name != "nt" or self._win_hotkey_polling:
-            return
-        self._win_hotkey_polling = True
-        self.root.after(50, self._poll_windows_hotkeys)
-
-    def _poll_windows_hotkeys(self) -> None:
-        if os.name != "nt":
-            return
-        user32 = ctypes.windll.user32
-        msg = ctypes.wintypes.MSG()
-        wm_hotkey = 0x0312
-        pm_remove = 0x0001
-        hwnd = self.root.winfo_id()
-        while user32.PeekMessageW(ctypes.byref(msg), hwnd, wm_hotkey, wm_hotkey, pm_remove):
-            callback = self._win_hotkey_callbacks.get(msg.wParam)
-            if callback:
-                threading.Thread(target=callback, daemon=True).start()
-        if self._win_hotkey_callbacks:
-            self.root.after(50, self._poll_windows_hotkeys)
-        else:
-            self._win_hotkey_polling = False
-
-    def _clear_windows_hotkeys(self) -> None:
-        if os.name != "nt":
-            return
-        if not self._win_hotkey_callbacks:
-            self._win_hotkey_polling = False
-            return
-        user32 = ctypes.windll.user32
-        hwnd = self.root.winfo_id()
-        for hotkey_id in list(self._win_hotkey_callbacks.keys()):
-            user32.UnregisterHotKey(hwnd, hotkey_id)
-        self._win_hotkey_callbacks.clear()
-        self._win_hotkeys.clear()
-        self._win_hotkey_polling = False
-
-    def _parse_windows_hotkey(self, combo: str) -> Optional[Tuple[int, int]]:
-        parts = [part.strip().upper() for part in combo.split("+") if part.strip()]
-        if not parts:
-            return None
-        modifier_map = {
-            "CTRL": 0x0002,
-            "CONTROL": 0x0002,
-            "SHIFT": 0x0004,
-            "ALT": 0x0001,
-            "WIN": 0x0008,
-            "WINDOWS": 0x0008,
-        }
-        modifiers = 0
-        for mod in parts[:-1]:
-            if mod in modifier_map:
-                modifiers |= modifier_map[mod]
-            else:
-                return None
-        key = parts[-1]
-        special_keys = {
-            "SPACE": 0x20,
-            "ENTER": 0x0D,
-            "RETURN": 0x0D,
-            "TAB": 0x09,
-            "ESC": 0x1B,
-            "ESCAPE": 0x1B,
-            "BACKSPACE": 0x08,
-            "DELETE": 0x2E,
-            "UP": 0x26,
-            "DOWN": 0x28,
-            "LEFT": 0x25,
-            "RIGHT": 0x27,
-        }
-        if key in special_keys:
-            key_code = special_keys[key]
-        elif len(key) == 1:
-            key_code = ord(key)
-        elif key.startswith("F") and key[1:].isdigit():
-            f_number = int(key[1:])
-            if 1 <= f_number <= 24:
-                key_code = 0x70 + (f_number - 1)
-            else:
-                return None
-        else:
-            return None
-        return modifiers, key_code
-
-    def _tk_binding_for_combo(self, combo: str) -> Optional[str]:
-        parts = [part.strip().upper() for part in combo.split("+") if part.strip()]
-        if not parts:
-            return None
-        modifiers_map = {
-            "CTRL": "Control",
-            "CONTROL": "Control",
-            "SHIFT": "Shift",
-            "ALT": "Alt",
-        }
-        modifiers = [modifiers_map[p] for p in parts[:-1] if p in modifiers_map]
-        key = parts[-1]
-        special_keys = {
-            "SPACE": "space",
-            "ENTER": "Return",
-            "RETURN": "Return",
-            "TAB": "Tab",
-            "ESC": "Escape",
-            "ESCAPE": "Escape",
-            "BACKSPACE": "BackSpace",
-            "DELETE": "Delete",
-            "UP": "Up",
-            "DOWN": "Down",
-            "LEFT": "Left",
-            "RIGHT": "Right",
-        }
-        if key in special_keys:
-            key_name = special_keys[key]
-        elif len(key) == 1:
-            key_name = key.lower()
-        elif key.startswith("F") and key[1:].isdigit():
-            key_name = key
-        else:
-            return None
-        pieces = modifiers + [key_name]
-        return f"<{'-'.join(pieces)}>"
 
     def _send_toggle_action(self) -> None:
         action = self._toggle_action()
