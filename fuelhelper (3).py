@@ -350,9 +350,12 @@ class FuelHelperApp:
         pit_audio_path = self._config.get("pit_audio_path")
         if pit_audio_path:
             self.pit_audio.set_path(pit_audio_path)
-        volume = self._load_volume(self._config.get("audio_volume", 1.0))
-        self.audio.set_volume(volume)
-        self.pit_audio.set_volume(volume)
+        autofuel_volume = self._load_volume(self._config.get("audio_volume", 1.0))
+        pit_volume = self._load_volume(
+            self._config.get("pit_audio_volume", self._config.get("audio_volume", 1.0))
+        )
+        self.audio.set_volume(autofuel_volume)
+        self.pit_audio.set_volume(pit_volume)
         pit_alert_pct = self._config.get("pit_alert_pct", 0.65)
         try:
             pit_alert_pct = float(pit_alert_pct)
@@ -364,7 +367,7 @@ class FuelHelperApp:
         )
         self._tank_capacity_value = self._load_tank_capacity(self._config.get("tank_capacity"))
 
-        self._build_ui(audio_path, pit_audio_path, pit_alert_pct, volume)
+        self._build_ui(audio_path, pit_audio_path, pit_alert_pct, autofuel_volume, pit_volume)
 
         self._worker = TelemetryWorker(
             audio=self.audio,
@@ -382,7 +385,8 @@ class FuelHelperApp:
         audio_path: Optional[str],
         pit_audio_path: Optional[str],
         pit_alert_pct: float,
-        volume: float,
+        autofuel_volume: float,
+        pit_volume: float,
     ) -> None:
         main = ttk.Frame(self.root, padding=12)
         main.grid(row=0, column=0, sticky="nsew")
@@ -424,30 +428,52 @@ class FuelHelperApp:
             row=4, column=3, sticky="e"
         )
 
-        ttk.Label(main, text="Alert volume:").grid(row=5, column=0, sticky="w", pady=(8, 0))
-        self.volume_var = tk.DoubleVar(value=volume)
-        self.volume_value_label = ttk.Label(main, text=format_percent(volume))
-        self.volume_value_label.grid(row=5, column=2, sticky="e")
-        volume_scale = ttk.Scale(
+        ttk.Label(main, text="Autofuel alert volume:").grid(
+            row=5, column=0, sticky="w", pady=(8, 0)
+        )
+        self.autofuel_volume_var = tk.DoubleVar(value=autofuel_volume)
+        self.autofuel_volume_value_label = ttk.Label(
+            main, text=format_percent(autofuel_volume)
+        )
+        self.autofuel_volume_value_label.grid(row=5, column=2, sticky="e")
+        autofuel_volume_scale = ttk.Scale(
             main,
             from_=0.0,
             to=1.0,
             orient="horizontal",
-            variable=self.volume_var,
-            command=self._on_volume_change,
+            variable=self.autofuel_volume_var,
+            command=self._on_autofuel_volume_change,
         )
-        volume_scale.grid(row=6, column=0, columnspan=3, sticky="ew")
+        autofuel_volume_scale.grid(row=6, column=0, columnspan=3, sticky="ew")
 
-        ttk.Label(main, text="Fuel tank capacity:").grid(row=7, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(main, text="Pit warning volume:").grid(
+            row=7, column=0, sticky="w", pady=(8, 0)
+        )
+        self.pit_volume_var = tk.DoubleVar(value=pit_volume)
+        self.pit_volume_value_label = ttk.Label(main, text=format_percent(pit_volume))
+        self.pit_volume_value_label.grid(row=7, column=2, sticky="e")
+        pit_volume_scale = ttk.Scale(
+            main,
+            from_=0.0,
+            to=1.0,
+            orient="horizontal",
+            variable=self.pit_volume_var,
+            command=self._on_pit_volume_change,
+        )
+        pit_volume_scale.grid(row=8, column=0, columnspan=3, sticky="ew")
+
+        ttk.Label(main, text="Fuel tank capacity:").grid(
+            row=9, column=0, sticky="w", pady=(8, 0)
+        )
         self.tank_capacity_var = tk.StringVar(
             value="" if self._tank_capacity_value is None else f"{self._tank_capacity_value:.2f}"
         )
         self.tank_capacity_entry = ttk.Entry(main, textvariable=self.tank_capacity_var, width=12)
-        self.tank_capacity_entry.grid(row=8, column=0, sticky="w")
+        self.tank_capacity_entry.grid(row=10, column=0, sticky="w")
         self.tank_capacity_entry.bind("<FocusOut>", self._on_tank_capacity_change)
         self.tank_capacity_entry.bind("<Return>", self._on_tank_capacity_change)
         self.tank_capacity_unit_label = ttk.Label(main, text="(units)")
-        self.tank_capacity_unit_label.grid(row=8, column=1, sticky="w")
+        self.tank_capacity_unit_label.grid(row=10, column=1, sticky="w")
         self.tank_capacity_lock = tk.BooleanVar(
             value=bool(self._config.get("tank_capacity_locked", False))
         )
@@ -457,15 +483,15 @@ class FuelHelperApp:
             variable=self.tank_capacity_lock,
             command=self._on_tank_capacity_lock_toggle,
         )
-        self.tank_capacity_lock_check.grid(row=8, column=2, sticky="w", padx=(8, 0))
+        self.tank_capacity_lock_check.grid(row=10, column=2, sticky="w", padx=(8, 0))
         self._update_tank_capacity_entry_state()
 
         ttk.Label(main, text="Pit warning trigger (lap %):").grid(
-            row=9, column=0, sticky="w", pady=(8, 0)
+            row=11, column=0, sticky="w", pady=(8, 0)
         )
         self.pit_alert_pct = tk.DoubleVar(value=pit_alert_pct)
         self.pit_alert_value_label = ttk.Label(main, text=format_percent(pit_alert_pct))
-        self.pit_alert_value_label.grid(row=9, column=2, sticky="e")
+        self.pit_alert_value_label.grid(row=11, column=2, sticky="e")
         pit_scale = ttk.Scale(
             main,
             from_=0.0,
@@ -474,16 +500,16 @@ class FuelHelperApp:
             variable=self.pit_alert_pct,
             command=self._on_pit_alert_change,
         )
-        pit_scale.grid(row=10, column=0, columnspan=3, sticky="ew")
+        pit_scale.grid(row=12, column=0, columnspan=3, sticky="ew")
 
         self.status_label = ttk.Label(main, text="Status: waiting for telemetry...")
-        self.status_label.grid(row=11, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        self.status_label.grid(row=13, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
         self.metrics_text = tk.Text(main, height=8, width=48, state="disabled")
-        self.metrics_text.grid(row=12, column=0, columnspan=3, pady=(6, 0), sticky="nsew")
+        self.metrics_text.grid(row=14, column=0, columnspan=3, pady=(6, 0), sticky="nsew")
 
         main.columnconfigure(1, weight=1)
-        main.rowconfigure(12, weight=1)
+        main.rowconfigure(14, weight=1)
 
     def _choose_audio(self) -> None:
         path = filedialog.askopenfilename(
@@ -535,12 +561,18 @@ class FuelHelperApp:
         self._config["pit_alert_pct"] = value
         save_config(self._config)
 
-    def _on_volume_change(self, *_args: object) -> None:
-        value = self._load_volume(self.volume_var.get())
-        self.volume_value_label.configure(text=format_percent(value))
+    def _on_autofuel_volume_change(self, *_args: object) -> None:
+        value = self._load_volume(self.autofuel_volume_var.get())
+        self.autofuel_volume_value_label.configure(text=format_percent(value))
         self.audio.set_volume(value)
-        self.pit_audio.set_volume(value)
         self._config["audio_volume"] = value
+        save_config(self._config)
+
+    def _on_pit_volume_change(self, *_args: object) -> None:
+        value = self._load_volume(self.pit_volume_var.get())
+        self.pit_volume_value_label.configure(text=format_percent(value))
+        self.pit_audio.set_volume(value)
+        self._config["pit_audio_volume"] = value
         save_config(self._config)
 
     def _on_tank_capacity_change(self, *_args: object) -> None:
