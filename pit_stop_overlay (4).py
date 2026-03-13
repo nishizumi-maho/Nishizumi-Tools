@@ -7,7 +7,6 @@ import math
 import json
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk
 from typing import Dict, List, Optional, Tuple
 
 import irsdk
@@ -20,13 +19,27 @@ RATE_FILE = Path(__file__).with_name("pit_stop_overlay_fuel_rates.json")
 
 
 class PitStopOverlay:
+    BG = "#0f1115"
+    PANEL = "#171a21"
+    PANEL_ALT = "#1d2230"
+    TEXT = "#f2f2f2"
+    MUTED = "#9aa4b2"
+    ENTRY_BG = "#101826"
+    ENTRY_BORDER = "#2b3647"
+
     def __init__(self) -> None:
         self.ir = irsdk.IRSDK()
 
         self.root = tk.Tk()
         self.root.title("Pit Window Overlay")
-        self.root.geometry("470x420")
+        self.root.geometry("500x440")
+        self.root.configure(bg=self.BG)
+        self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", 0.95)
+
+        self._drag_offset_x = 0
+        self._drag_offset_y = 0
 
         self.base_loss_var = tk.StringVar(value="20.0")
         self.tire_loss_var = tk.StringVar(value="0.0")
@@ -54,15 +67,61 @@ class PitStopOverlay:
         self._is_fueling = False
         self._fueling_samples: List[float] = []
         self._fuel_rate_autofilled = False
-        self._editable_entries: List[ttk.Entry] = []
+        self._editable_entries: List[tk.Entry] = []
 
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.main_frame = ttk.Frame(self.root, padding=12)
+        self.title_bar = tk.Frame(self.root, bg=self.BG)
+        self.title_bar.pack(fill="x", padx=10, pady=(8, 4))
+
+        title_stack = tk.Frame(self.title_bar, bg=self.BG)
+        title_stack.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            title_stack,
+            text="Pit Stop Overlay",
+            font=("Segoe UI", 13, "bold"),
+            fg="#d8f8d8",
+            bg=self.BG,
+        ).pack(anchor="w")
+        tk.Label(
+            title_stack,
+            text="Loss + rejoin safety estimator",
+            font=("Segoe UI", 9),
+            fg=self.MUTED,
+            bg=self.BG,
+        ).pack(anchor="w")
+
+        self.close_button = tk.Button(
+            self.title_bar,
+            text="✕",
+            command=self.root.destroy,
+            font=("Segoe UI", 10, "bold"),
+            bg="#1f2533",
+            fg=self.TEXT,
+            activebackground="#2b3447",
+            activeforeground="white",
+            relief="flat",
+            width=2,
+            padx=0,
+            pady=0,
+            takefocus=False,
+        )
+        self.close_button.pack(side="right")
+
+        self.main_frame = tk.Frame(self.root, bg=self.BG)
         self.main_frame.pack(fill="both", expand=True)
 
-        self.inputs_frame = ttk.LabelFrame(self.main_frame, text="Pit loss setup", padding=10)
+        self.inputs_frame = tk.LabelFrame(
+            self.main_frame,
+            text=" Pit loss setup ",
+            font=("Segoe UI", 10, "bold"),
+            fg=self.TEXT,
+            bg=self.PANEL,
+            bd=0,
+            padx=10,
+            pady=10,
+        )
         self.inputs_frame.pack(fill="x")
 
         self._editable_entries.append(
@@ -73,79 +132,133 @@ class PitStopOverlay:
         )
         self._row_entry(self.inputs_frame, "Fuel rate [L/s] (auto-learned)", self.fuel_rate_var, 2, editable=False)
 
-        custom_max_check = ttk.Checkbutton(
+        custom_max_check = tk.Checkbutton(
             self.inputs_frame,
             text="Use custom fuel tank max [L]",
             variable=self.use_custom_fuel_max_var,
+            font=("Segoe UI", 10),
+            fg=self.TEXT,
+            bg=self.PANEL,
+            activebackground=self.PANEL,
+            activeforeground=self.TEXT,
+            selectcolor=self.BG,
         )
         custom_max_check.grid(row=3, column=0, sticky="w", padx=(0, 8), pady=(6, 2))
         custom_max_entry = self._row_entry(self.inputs_frame, "Custom fuel max [L]", self.custom_fuel_max_var, 4)
         self._editable_entries.append(custom_max_entry)
 
-        lock_check = ttk.Checkbutton(
+        lock_check = tk.Checkbutton(
             self.inputs_frame,
             text="Lock typed inputs (read-only)",
             variable=self.lock_inputs_var,
             command=self._apply_lock_state,
+            font=("Segoe UI", 10),
+            fg=self.TEXT,
+            bg=self.PANEL,
+            activebackground=self.PANEL,
+            activeforeground=self.TEXT,
+            selectcolor=self.BG,
         )
         lock_check.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 2))
 
-        minimal_mode_check = ttk.Checkbutton(
+        minimal_mode_check = tk.Checkbutton(
             self.inputs_frame,
             text="Race minimal mode (only pit rejoin safety bar)",
             variable=self.minimal_mode_var,
             command=self._apply_minimal_mode,
+            font=("Segoe UI", 10),
+            fg=self.TEXT,
+            bg=self.PANEL,
+            activebackground=self.PANEL,
+            activeforeground=self.TEXT,
+            selectcolor=self.BG,
         )
         minimal_mode_check.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 2))
 
-        self.connection_label = ttk.Label(self.main_frame, textvariable=self.connection_var, foreground="#555")
+        self.connection_label = tk.Label(
+            self.main_frame,
+            textvariable=self.connection_var,
+            fg=self.MUTED,
+            bg=self.BG,
+            font=("Segoe UI", 9),
+        )
         self.connection_label.pack(anchor="w", pady=(8, 2))
-        self.car_label = ttk.Label(self.main_frame, textvariable=self.car_var, foreground="#555")
+        self.car_label = tk.Label(
+            self.main_frame,
+            textvariable=self.car_var,
+            fg=self.MUTED,
+            bg=self.BG,
+            font=("Segoe UI", 9),
+        )
         self.car_label.pack(anchor="w", pady=(0, 4))
-        self.top_separator = ttk.Separator(self.main_frame)
+        self.top_separator = tk.Frame(self.main_frame, bg="#2b3447", height=1)
         self.top_separator.pack(fill="x", pady=4)
 
-        self.metrics_frame = ttk.LabelFrame(self.main_frame, text="Live calculations", padding=10)
+        self.metrics_frame = tk.LabelFrame(
+            self.main_frame,
+            text=" Live calculations ",
+            font=("Segoe UI", 10, "bold"),
+            fg=self.TEXT,
+            bg=self.PANEL,
+            bd=0,
+            padx=10,
+            pady=10,
+        )
         self.metrics_frame.pack(fill="x", pady=(6, 8))
 
-        ttk.Label(self.metrics_frame, textvariable=self.fuel_state_var, font=("Segoe UI", 10)).pack(anchor="w")
-        ttk.Label(self.metrics_frame, textvariable=self.fuel_time_var, font=("Segoe UI", 10)).pack(anchor="w", pady=(2, 0))
-        ttk.Label(self.metrics_frame, textvariable=self.total_time_var, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(5, 0))
+        tk.Label(self.metrics_frame, textvariable=self.fuel_state_var, font=("Segoe UI", 10), fg=self.TEXT, bg=self.PANEL).pack(anchor="w")
+        tk.Label(self.metrics_frame, textvariable=self.fuel_time_var, font=("Segoe UI", 10), fg=self.TEXT, bg=self.PANEL).pack(anchor="w", pady=(2, 0))
+        tk.Label(self.metrics_frame, textvariable=self.total_time_var, font=("Segoe UI", 11, "bold"), fg="#d8f8d8", bg=self.PANEL).pack(anchor="w", pady=(5, 0))
 
-        self.status_frame = ttk.LabelFrame(self.main_frame, text="Pit rejoin safety", padding=10)
+        self.status_frame = tk.LabelFrame(
+            self.main_frame,
+            text=" Pit rejoin safety ",
+            font=("Segoe UI", 10, "bold"),
+            fg=self.TEXT,
+            bg=self.PANEL_ALT,
+            bd=0,
+            padx=10,
+            pady=10,
+        )
         self.status_frame.pack(fill="both", expand=True)
 
         self.score_label = tk.Label(
             self.status_frame,
             textvariable=self.window_var,
             font=("Segoe UI", 28, "bold"),
-            bg="#4b5563",
+            bg="#3e495f",
             fg="white",
             padx=12,
             pady=10,
         )
         self.score_label.pack(fill="x")
 
-        self.status_details_label = ttk.Label(
+        self.status_details_label = tk.Label(
             self.status_frame,
             textvariable=self.status_var,
             font=("Segoe UI", 11),
             wraplength=430,
             justify="left",
+            fg=self.TEXT,
+            bg=self.PANEL_ALT,
         )
         self.status_details_label.pack(anchor="w", pady=(10, 4))
 
-        self.legend_label = ttk.Label(
+        self.legend_label = tk.Label(
             self.status_frame,
             text=(
                 "Legend: GREEN >= 5.0 s free front and rear, "
                 "YELLOW >= 1.5 s, RED < 1.5 s."
             ),
-            foreground="#555",
+            fg=self.MUTED,
+            bg=self.PANEL_ALT,
             wraplength=430,
             justify="left",
         )
         self.legend_label.pack(anchor="w")
+
+        self.root.bind("<ButtonPress-1>", self._start_move)
+        self.root.bind("<B1-Motion>", self._on_move)
 
     def _apply_minimal_mode(self) -> None:
         if self.minimal_mode_var.get():
@@ -156,7 +269,7 @@ class PitStopOverlay:
             self.metrics_frame.pack_forget()
             self.status_details_label.pack_forget()
             self.legend_label.pack_forget()
-            self.root.geometry("260x120")
+            self.root.geometry("300x130")
             return
 
         self.inputs_frame.pack(fill="x")
@@ -166,22 +279,53 @@ class PitStopOverlay:
         self.metrics_frame.pack(fill="x", pady=(6, 8))
         self.status_details_label.pack(anchor="w", pady=(10, 4))
         self.legend_label.pack(anchor="w")
-        self.root.geometry("470x420")
+        self.root.geometry("500x440")
 
-    @staticmethod
     def _row_entry(
-        parent: ttk.Widget,
+        self,
+        parent: tk.Widget,
         label: str,
         var: tk.StringVar,
         row: int,
         editable: bool = True,
-    ) -> ttk.Entry:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+    ) -> tk.Entry:
+        tk.Label(
+            parent,
+            text=label,
+            font=("Segoe UI", 10),
+            fg=self.TEXT,
+            bg=self.PANEL,
+        ).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
         state = "normal" if editable else "readonly"
-        entry = ttk.Entry(parent, textvariable=var, width=12, state=state)
+        entry = tk.Entry(
+            parent,
+            textvariable=var,
+            width=12,
+            state=state,
+            font=("Segoe UI", 10),
+            justify="center",
+            bg=self.ENTRY_BG,
+            fg=self.TEXT,
+            readonlybackground=self.ENTRY_BG,
+            disabledforeground="#7f8ea3",
+            insertbackground=self.TEXT,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=self.ENTRY_BORDER,
+            highlightcolor="#3c79ff",
+        )
         entry.grid(row=row, column=1, sticky="e", pady=4)
         parent.grid_columnconfigure(0, weight=1)
         return entry
+
+    def _start_move(self, event: tk.Event) -> None:
+        self._drag_offset_x = event.x_root - self.root.winfo_x()
+        self._drag_offset_y = event.y_root - self.root.winfo_y()
+
+    def _on_move(self, event: tk.Event) -> None:
+        x = event.x_root - self._drag_offset_x
+        y = event.y_root - self._drag_offset_y
+        self.root.geometry(f"+{x}+{y}")
 
     @staticmethod
     def _safe_float(value: str, default: float = 0.0, minimum: float = 0.0) -> float:
