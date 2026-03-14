@@ -10,12 +10,13 @@ Features
 from __future__ import annotations
 
 import math
+import os
 import statistics
 import tkinter as tk
 from collections import deque
 from dataclasses import dataclass
-from tkinter import ttk
-from typing import Deque, List, Optional, Sequence, Tuple
+from tkinter import filedialog, ttk
+from typing import Any, Deque, List, Optional, Sequence, Tuple
 
 import irsdk
 
@@ -29,6 +30,7 @@ MIN_SAMPLES_PER_BIN = 5
 MAX_LAP_HISTORY = 1000
 RECENT_VALID_LAPS = 5
 TOGGLE_MODE_KEY = "m"
+MIN_LAPS_FOR_FEEDBACK = 5
 
 
 @dataclass
@@ -74,6 +76,7 @@ class TractionCircleOverlay:
         self.quality_var = tk.StringVar(value="Valid laps used: 0 | Invalid laps discarded: 0 | Outliers removed: 0")
         self.summary_var = tk.StringVar(value="Collecting lap data...")
         self.mode_var = tk.StringVar(value="Mode: compact")
+        self.reference_var = tk.StringVar(value="Reference: live adaptive")
 
         self.current_lap_num: Optional[int] = None
         self.current_lap_bins: List[float] = [0.0] * BINS_PER_LAP
@@ -95,6 +98,8 @@ class TractionCircleOverlay:
         self.estimated_limit_g = 1.8
 
         self.compact_mode = True
+        self.external_reference_bins: Optional[List[float]] = None
+        self.external_reference_path: Optional[str] = None
 
         self._build_ui()
         self.root.bind(f"<{TOGGLE_MODE_KEY}>", self._toggle_mode)
@@ -109,6 +114,8 @@ class TractionCircleOverlay:
 
         ttk.Label(controls, textvariable=self.status_var, foreground="#4b5563").pack(side="left")
         ttk.Label(controls, text=f"  Toggle: '{TOGGLE_MODE_KEY.upper()}'", foreground="#4b5563").pack(side="left")
+        ttk.Button(controls, text="Load IBT", command=self._load_ibt_reference).pack(side="right")
+        ttk.Button(controls, text="Use Live", command=self._clear_ibt_reference).pack(side="right", padx=(0, 6))
 
         ttk.Label(container, textvariable=self.header_var, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
 
@@ -136,6 +143,7 @@ class TractionCircleOverlay:
         ttk.Separator(right).pack(fill="x", pady=10)
 
         ttk.Label(right, textvariable=self.mode_var, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(right, textvariable=self.reference_var, font=("Segoe UI", 9), foreground="#4b5563").pack(anchor="w")
         self.summary_label = ttk.Label(
             right,
             textvariable=self.summary_var,
@@ -308,6 +316,86 @@ class TractionCircleOverlay:
             reference[i] = filtered[idx]
             self.bin_confidence[i] = True
         return reference
+
+    @staticmethod
+    def _read_ibt_series(ibt: Any, name: str) -> List[float]:
+        for method_name in ("get_all", "get"):
+            method = getattr(ibt, method_name, None)
+            if callable(method):
+                try:
+                    values = method(name)
+                except Exception:
+                    continue
+                if values is not None:
+                    return [TractionCircleOverlay._safe_float(v, default=0.0) for v in list(values)]
+
+        try:
+            values = ibt[name]  # type: ignore[index]
+            return [TractionCircleOverlay._safe_float(v, default=0.0) for v in list(values)]
+        except Exception:
+            return []
+
+    def _reference_from_ibt(self, file_path: str) -> Optional[List[float]]:
+        ibt_reader = getattr(irsdk, "IBT", None)
+        if ibt_reader is None:
+            self.status_var.set("Your irsdk build does not expose IBT reader support.")
+            return None
+
+        try:
+            ibt = ibt_reader()
+            opened = ibt.open(file_path)
+        except Exception as exc:
+            self.status_var.set(f"Failed to open IBT: {exc}")
+            return None
+
+        if opened is False:
+            self.status_var.set("Failed to open IBT file.")
+            return None
+
+        lap_dist = self._read_ibt_series(ibt, "LapDistPct")
+        long_accel = self._read_ibt_series(ibt, "LongAccel")
+        lat_accel = self._read_ibt_series(ibt, "LatAccel")
+        if not lap_dist or not long_accel or not lat_accel:
+            self.status_var.set("IBT is missing LapDistPct / LongAccel / LatAccel.")
+            return None
+
+        sample_count = min(len(lap_dist), len(long_accel), len(lat_accel))
+        bins = [0.0] * BINS_PER_LAP
+        for i in range(sample_count):
+            idx = self._bin_index(self._safe_float(lap_dist[i], default=0.0))
+            long_g = self._safe_float(long_accel[i], default=0.0) / G_CONSTANT
+            lat_g = self._safe_float(lat_accel[i], default=0.0) / G_CONSTANT
+            total_g = math.hypot(long_g, lat_g)
+            if total_g > bins[idx]:
+                bins[idx] = total_g
+
+        if max(bins, default=0.0) < MIN_REFERENCE_G:
+            self.status_var.set("IBT loaded, but no meaningful grip reference could be built.")
+            return None
+        return bins
+
+    def _load_ibt_reference(self) -> None:
+        file_path = filedialog.askopenfilename(
+            title="Load IBT reference",
+            filetypes=[("iRacing telemetry", "*.ibt"), ("All files", "*.*")],
+        )
+        if not file_path:
+            return
+
+        bins = self._reference_from_ibt(file_path)
+        if bins is None:
+            return
+
+        self.external_reference_bins = bins
+        self.external_reference_path = file_path
+        self.reference_var.set(f"Reference: IBT {os.path.basename(file_path)}")
+        self.status_var.set("IBT reference loaded. Feedback starts after 5 valid laps.")
+
+    def _clear_ibt_reference(self) -> None:
+        self.external_reference_bins = None
+        self.external_reference_path = None
+        self.reference_var.set("Reference: live adaptive")
+        self.status_var.set("Using live adaptive reference from your valid laps.")
 
     @staticmethod
     def _phase_and_recommendation(neg_long: float, lat: float, pos_long: float) -> Tuple[str, str]:
@@ -514,8 +602,24 @@ class TractionCircleOverlay:
         self._update_lap_storage(lap_num, lap_dist_pct, g_total, long_g, lat_g, offtrack)
 
         valid_laps = [lap for lap in self.lap_history if lap.valid]
-        reference = self._compute_reference_by_bin(valid_laps)
-        segments = self._detect_underuse_segments(valid_laps, reference)
+        if self.external_reference_bins is not None:
+            reference = self.external_reference_bins
+            self.outliers_removed_last = 0
+            self.bin_confidence = [v >= MIN_REFERENCE_G for v in reference]
+        else:
+            reference = self._compute_reference_by_bin(valid_laps)
+
+        if len(valid_laps) < MIN_LAPS_FOR_FEEDBACK:
+            laps_left = MIN_LAPS_FOR_FEEDBACK - len(valid_laps)
+            if self.external_reference_bins is not None:
+                segments: List[UnderuseSegment] = []
+                self.summary_var.set(
+                    f"IBT loaded. Complete {laps_left} more valid lap(s) for coaching vs pro baseline."
+                )
+            else:
+                segments = self._detect_underuse_segments(valid_laps, reference)
+        else:
+            segments = self._detect_underuse_segments(valid_laps, reference)
 
         usage_pct = (g_total / max(0.5, self.estimated_limit_g)) * 100.0
         self.current_var.set(
@@ -531,7 +635,8 @@ class TractionCircleOverlay:
             f"Valid laps: {len(valid_laps)}"
         )
         self.mode_var.set(f"Mode: {'compact' if self.compact_mode else 'detailed'}")
-        self.summary_var.set(self._format_summary(segments, self.compact_mode))
+        if len(valid_laps) >= MIN_LAPS_FOR_FEEDBACK or self.external_reference_bins is None:
+            self.summary_var.set(self._format_summary(segments, self.compact_mode))
 
         self._draw_circle(long_g, lat_g)
         self.root.after(UPDATE_MS, self._update)
