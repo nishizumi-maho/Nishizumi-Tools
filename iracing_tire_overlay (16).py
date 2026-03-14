@@ -508,6 +508,10 @@ class TelemetryReader(threading.Thread):
     @staticmethod
     def _safe_float(v, default=0.0) -> float:
         try:
+            if isinstance(v, (list, tuple, np.ndarray)):
+                if len(v) == 0:
+                    return float(default)
+                v = v[0]
             return float(v) if v is not None else float(default)
         except Exception as exc:
             log_warning_limited("telemetry_safe_float", "Telemetry float conversion failed", exc, interval_s=10.0)
@@ -516,6 +520,10 @@ class TelemetryReader(threading.Thread):
     @staticmethod
     def _safe_int(v, default=0) -> int:
         try:
+            if isinstance(v, (list, tuple, np.ndarray)):
+                if len(v) == 0:
+                    return int(default)
+                v = v[0]
             return int(v) if v is not None else int(default)
         except Exception as exc:
             log_warning_limited("telemetry_safe_int", "Telemetry int conversion failed", exc, interval_s=10.0)
