@@ -311,6 +311,18 @@ class StintTracker:
         car = clean(s.car_path, "unknown_car")
         return f"{track}+{config}+{car}"
 
+    @staticmethod
+    def laps_in_stint(current: TelemetrySnapshot, previous: TelemetrySnapshot) -> float:
+        """Return lap progress completed between two snapshots.
+
+        Uses lap + lap distance percent so partial laps are accounted for while
+        avoiding negative jumps across session resets/rewinds.
+        """
+
+        prev_progress = float(previous.lap) + float(previous.lap_dist_pct)
+        curr_progress = float(current.lap) + float(current.lap_dist_pct)
+        return max(0.0, curr_progress - prev_progress)
+
     def update(self, snapshot: TelemetrySnapshot) -> Optional[dict]:
         speed_kmh = snapshot.speed_mps * 3.6
         self.min_speed_kmh = min(self.min_speed_kmh, speed_kmh)
