@@ -23,7 +23,7 @@ import signal
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -105,130 +105,180 @@ class DataStorage:
             self.data[key]["samples"].append(sample)
 
 
-class TireModel:
-    """Learns wear-per-energy rates with per-tire temperature compensation."""
+_PHI_DIM = 7
 
-    MIN_TEMP_SPREAD_C = 0.75
-    FULL_CONFIDENCE_STINTS = 10.0
-    FULL_CONFIDENCE_LAPS = 80.0
+
+def _phi(track_temp: float, air_temp: float, humidity: float, energy_per_lap: float) -> np.ndarray:
+    t_track = float(track_temp)
+    e_lap = float(energy_per_lap)
+    return np.array(
+        [
+            1.0,
+            t_track,
+            t_track * t_track,
+            float(air_temp),
+            float(humidity),
+            e_lap,
+            t_track * e_lap,
+        ],
+        dtype=float,
+    )
+
+
+class RLSEstimator:
+    """Single-target recursive least squares estimator."""
+
+    def __init__(self, lam: float = 0.98, sigma0: float = 1e4):
+        self.lam = float(lam)
+        self.theta = np.zeros(_PHI_DIM, dtype=float)
+        self.P = float(sigma0) * np.eye(_PHI_DIM, dtype=float)
+        self.n_updates = 0
+        self.mad_error = 1e-4
+
+    def update(self, x: np.ndarray, y: float) -> float:
+        px = self.P @ x
+        gain = px / (self.lam + float(x @ px))
+        error = float(y) - float(x @ self.theta)
+        self.theta += gain * error
+        self.P = (self.P - np.outer(gain, px)) / self.lam
+        self.n_updates += 1
+        self.mad_error = 0.95 * self.mad_error + 0.05 * abs(error)
+        return error
+
+    def predict(self, x: np.ndarray) -> float:
+        return max(0.0, float(x @ self.theta))
+
+    @property
+    def confidence(self) -> float:
+        return float(np.tanh(self.n_updates / 13.0))
+
+    @property
+    def uncertainty_trace(self) -> float:
+        return float(np.trace(self.P))
+
+    def to_dict(self) -> dict:
+        return {
+            "theta": self.theta.tolist(),
+            "P": [r.tolist() for r in self.P],
+            "n_updates": int(self.n_updates),
+            "lam": float(self.lam),
+            "mad_error": float(self.mad_error),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RLSEstimator":
+        obj = cls(lam=float(data.get("lam", 0.98)))
+        obj.theta = np.array(data.get("theta", np.zeros(_PHI_DIM)), dtype=float)
+        obj.P = np.array(data.get("P", np.eye(_PHI_DIM) * 1e4), dtype=float)
+        obj.n_updates = int(data.get("n_updates", 0))
+        obj.mad_error = max(1e-6, float(data.get("mad_error", 1e-4)))
+        return obj
+
+
+class TireMLModel:
+    """Persistent online tire wear model powered by RLS per tire."""
 
     def __init__(self, storage: DataStorage):
         self.storage = storage
+        self._rls: Dict[str, RLSEstimator] = {t: RLSEstimator() for t in TIRE_KEYS}
 
     @staticmethod
-    def cluster_for_temp(track_temp: float) -> str:
-        if track_temp < 25.0:
-            return "cold"
-        if track_temp <= 35.0:
-            return "normal"
-        return "hot"
+    def _rls_key(dataset_key: str) -> str:
+        return f"{dataset_key}::rls"
 
-    @staticmethod
-    def _fit_temp_line(samples: List[dict], tire: str) -> Tuple[float, float]:
-        """
-        Fit wear_rate = base_rate + k * (track_temp - reference_temp)
-        with linear regression y = a + b*x, where y=wear_per_energy and x=track_temp.
-        """
-
-        if len(samples) < 2:
-            if not samples:
-                return 0.0, 0.0
-            return float(np.median([float(s.get(tire, 0.0)) for s in samples])), 0.0
-        x = np.array([float(s["track_temp"]) for s in samples], dtype=float)
-        y = np.array([float(s[tire]) for s in samples], dtype=float)
-
-        # Avoid poorly conditioned linear fits when all samples are from nearly
-        # the same track temperature.
-        if float(np.ptp(x)) < TireModel.MIN_TEMP_SPREAD_C:
-            return float(np.median(y)), 0.0
-
-        slope, intercept = np.polyfit(x, y, 1)
-        return float(intercept), float(slope)
-
-    @staticmethod
-    def _confidence(samples: List[dict]) -> float:
-        if not samples:
-            return 0.0
-        stint_factor = min(1.0, len(samples) / TireModel.FULL_CONFIDENCE_STINTS)
-        total_laps = sum(max(0.0, float(s.get("laps", 0.0))) for s in samples)
-        lap_factor = min(1.0, total_laps / TireModel.FULL_CONFIDENCE_LAPS)
-        return float(np.sqrt(stint_factor * lap_factor))
-
-    @staticmethod
-    def _iqr_bounds(values: List[float]) -> Tuple[float, float]:
-        if len(values) < 4:
-            return -float("inf"), float("inf")
-        q1 = float(np.percentile(values, 25))
-        q3 = float(np.percentile(values, 75))
-        iqr = q3 - q1
-        return q1 - 1.5 * iqr, q3 + 1.5 * iqr
-
-    def is_outlier_sample(self, key: str, candidate: dict) -> bool:
-        samples = self.storage.get_samples(key)
-        if len(samples) < 4:
-            return False
+    def load_rls(self, dataset_key: str):
+        with self.storage.lock:
+            raw = self.storage.data.get(self._rls_key(dataset_key), {})
         for tire in TIRE_KEYS:
-            tire_vals = [float(s[tire]) for s in samples if tire in s]
-            low, high = self._iqr_bounds(tire_vals)
-            v = float(candidate[tire])
-            if v < low or v > high:
+            self._rls[tire] = RLSEstimator.from_dict(raw[tire]) if tire in raw else RLSEstimator()
+
+    def save_rls(self, dataset_key: str):
+        with self.storage.lock:
+            self.storage.data[self._rls_key(dataset_key)] = {t: self._rls[t].to_dict() for t in TIRE_KEYS}
+        self.storage.save()
+
+    def add_stint_sample(self, dataset_key: str, sample: dict):
+        self.storage.add_sample(dataset_key, sample)
+        x = _phi(
+            float(sample["track_temp"]),
+            float(sample["air_temp"]),
+            float(sample.get("humidity", 50.0)),
+            float(sample.get("energy_per_lap", 0.0)),
+        )
+        for tire in TIRE_KEYS:
+            self._rls[tire].update(x, float(sample[tire]))
+        self.save_rls(dataset_key)
+
+    def is_outlier(self, dataset_key: str, candidate: dict) -> bool:
+        x = _phi(
+            float(candidate["track_temp"]),
+            float(candidate["air_temp"]),
+            float(candidate.get("humidity", 50.0)),
+            float(candidate.get("energy_per_lap", 0.0)),
+        )
+        for tire in TIRE_KEYS:
+            rls = self._rls[tire]
+            if rls.n_updates < 4:
+                continue
+            pred = rls.predict(x)
+            pred_var = max(1e-10, float(x @ rls.P @ x) + rls.mad_error * rls.mad_error)
+            z = abs(float(candidate[tire]) - pred) / pred_var**0.5
+            if z > 3.5:
                 return True
         return False
 
-    def add_stint_sample(self, key: str, sample: dict):
-        self.storage.add_sample(key, sample)
-        self.storage.save()
+    def get_rates(
+        self,
+        dataset_key: str,
+        track_temp: float,
+        air_temp: float = 25.0,
+        humidity: float = 50.0,
+        energy_per_lap: float = 0.0,
+    ) -> Tuple[Dict[str, float], float, int]:
+        sample_count = self.sample_count(dataset_key)
+        if self._rls["lf"].n_updates == 0:
+            return {t: 0.0 for t in TIRE_KEYS}, 0.0, sample_count
+
+        x = _phi(track_temp, air_temp, humidity, energy_per_lap)
+        samples = self.storage.get_samples(dataset_key)
+        rates = {}
+        for tire in TIRE_KEYS:
+            rls = self._rls[tire]
+            conf = rls.confidence
+            prior = float(np.median([float(s[tire]) for s in samples if tire in s])) if samples else 0.0
+            rates[tire] = max(0.0, conf * rls.predict(x) + (1.0 - conf) * prior)
+        return rates, self._rls["lf"].confidence, sample_count
 
     def sample_count(self, key: str) -> int:
         return len(self.storage.get_samples(key))
 
-    def get_rates(self, key: str, track_temp: float) -> Tuple[Dict[str, float], str, int]:
-        """Return (wear_per_energy rates per tire, active cluster, sample_count)."""
-
-        samples = self.storage.get_samples(key)
-        if not samples:
-            return {t: 0.0 for t in TIRE_KEYS}, self.cluster_for_temp(track_temp), 0
-
-        cluster = self.cluster_for_temp(track_temp)
-        cluster_samples = [s for s in samples if self.cluster_for_temp(float(s["track_temp"])) == cluster]
-
-        # Cluster fallback to global model when sparse.
-        chosen = cluster_samples if len(cluster_samples) >= 3 else samples
-        confidence = self._confidence(chosen)
-        rates = {}
-        reference_temp = 30.0
-        for tire in TIRE_KEYS:
-            base, k = self._fit_temp_line(chosen, tire)
-            rate = base + k * (track_temp - reference_temp)
-
-            # More laps/stints should progressively dominate prediction.
-            global_values = [float(s.get(tire, 0.0)) for s in samples]
-            prior_rate = float(np.median(global_values)) if global_values else 0.0
-            blended_rate = confidence * float(rate) + (1.0 - confidence) * prior_rate
-            rates[tire] = max(0.0, blended_rate)
-
-        return rates, cluster, len(samples)
-
-    def get_wear_per_lap_baseline(self, key: str, track_temp: float) -> Dict[str, float]:
-        """Estimate wear-per-lap directly from learned samples as a robust fallback."""
-
+    def get_wear_per_lap_baseline(
+        self,
+        key: str,
+        track_temp: float,
+        air_temp: float = 25.0,
+        humidity: float = 50.0,
+    ) -> Dict[str, float]:
         samples = self.storage.get_samples(key)
         if not samples:
             return {t: 0.0 for t in TIRE_KEYS}
 
-        cluster = self.cluster_for_temp(track_temp)
-        cluster_samples = [s for s in samples if self.cluster_for_temp(float(s.get("track_temp", 0.0))) == cluster]
-        chosen = cluster_samples if len(cluster_samples) >= 3 else samples
+        med_epl = float(np.median([float(s.get("energy_per_lap", 0.0)) for s in samples]))
+        rates, _, _ = self.get_rates(key, track_temp, air_temp, humidity, med_epl)
+        return {t: rates[t] * med_epl for t in TIRE_KEYS}
 
-        wear_per_lap = {}
+    def get_coefficients_report(self, dataset_key: str) -> str:
+        names = ["bias", "T_track", "T_track²", "T_air", "humidity", "E/lap", "T_track×E/lap"]
+        lines = [f"=== Coefficients: {dataset_key} ==="]
         for tire in TIRE_KEYS:
-            values = []
-            for s in chosen:
-                energy_per_lap = max(0.0, float(s.get("energy_per_lap", 0.0)))
-                wear_per_energy = max(0.0, float(s.get(tire, 0.0)))
-                values.append(energy_per_lap * wear_per_energy)
-            wear_per_lap[tire] = float(np.median(values)) if values else 0.0
-        return wear_per_lap
+            rls = self._rls[tire]
+            lines.append(
+                f"\n[{tire.upper()}] n={rls.n_updates}  conf={rls.confidence:.1%}  "
+                f"P_trace={rls.uncertainty_trace:.2e}"
+            )
+            for name, coef in zip(names, rls.theta):
+                lines.append(f"  {name:20s}: {coef:+.6e}")
+        return "\n".join(lines)
 
 
 class StintTracker:
@@ -609,7 +659,8 @@ class ModelWorker(threading.Thread):
         self.state_lock = state_lock
         self.stop_event = stop_event
         self.storage = DataStorage(MODEL_PATH)
-        self.model = TireModel(self.storage)
+        self.model = TireMLModel(self.storage)
+        self._last_key = ""
         self.stints = StintTracker()
         self.smoothed_wear_per_lap = {t: 0.0 for t in TIRE_KEYS}
 
@@ -634,7 +685,7 @@ class ModelWorker(threading.Thread):
             tread={t: 100.0 for t in TIRE_KEYS},
             wear_per_lap={t: 0.0 for t in TIRE_KEYS},
             key="",
-            cluster="normal",
+            model_confidence=0.0,
             sample_count=0,
             estimate_ready=False,
         )
@@ -654,13 +705,34 @@ class ModelWorker(threading.Thread):
                 continue
 
             key = StintTracker.make_dataset_key(snap)
-            rates_energy, cluster, sample_count = self.model.get_rates(key, snap.track_temp)
-            baseline_wear_per_lap = self.model.get_wear_per_lap_baseline(key, snap.track_temp)
+            if key != self._last_key:
+                self.model.load_rls(key)
+                self._last_key = key
+
+            live_laps_done = 0.0
+            if self.stints.last_snapshot is not None:
+                live_laps_done = self.stints.laps_in_stint(snap, self.stints.last_snapshot)
+            live_energy_per_lap = self.stints.current_energy / max(1.0, live_laps_done)
+
+            rates_energy, model_confidence, sample_count = self.model.get_rates(
+                key,
+                snap.track_temp,
+                snap.air_temp,
+                snap.humidity,
+                live_energy_per_lap,
+            )
+            baseline_wear_per_lap = self.model.get_wear_per_lap_baseline(
+                key,
+                snap.track_temp,
+                snap.air_temp,
+                snap.humidity,
+            )
             self._update_state(
                 key=key,
                 track_temp=snap.track_temp,
                 air_temp=snap.air_temp,
-                cluster=cluster,
+                humidity=snap.humidity,
+                model_confidence=model_confidence,
                 sample_count=sample_count,
                 track_name=snap.track_name,
                 track_config=snap.track_config,
@@ -707,11 +779,16 @@ class ModelWorker(threading.Thread):
                 "rr": float(stint_end["wear_per_energy"]["rr"]),
             }
 
-            if self.model.is_outlier_sample(str(stint_end["key"]), sample):
+            sample["humidity"] = float(stint_end.get("humidity", 50.0))
+
+            if self.model.is_outlier(str(stint_end["key"]), sample):
                 continue
 
             self.model.add_stint_sample(str(stint_end["key"]), sample)
-            self._update_state(sample_count=self.model.sample_count(key))
+            self._update_state(
+                sample_count=self.model.sample_count(key),
+                model_confidence=self.model._rls["lf"].confidence,
+            )
 
 
 class InfoDialog(QtWidgets.QDialog):
@@ -830,6 +907,7 @@ class OverlayUI(QtWidgets.QWidget):
         self.state_lock = state_lock
         self.drag_origin: Optional[QtCore.QPoint] = None
         self.settings = self.load_settings()
+        self.model_ref = TireMLModel(DataStorage(MODEL_PATH))
 
         self.label = QtWidgets.QLabel(self)
         self.label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
@@ -935,7 +1013,8 @@ class OverlayUI(QtWidgets.QWidget):
             connected = self.state.get("connected", False)
             temp = float(self.state.get("track_temp", 0.0))
             air = float(self.state.get("air_temp", 0.0))
-            cluster = self.state.get("cluster", "normal")
+            humidity = float(self.state.get("humidity", 0.0))
+            model_conf = float(self.state.get("model_confidence", 0.0))
             samples = int(self.state.get("sample_count", 0))
 
         msg = (
@@ -943,9 +1022,12 @@ class OverlayUI(QtWidgets.QWidget):
             f"Dataset key: {key}\n"
             f"Track temp: {temp:.1f} °C\n"
             f"Air temp: {air:.1f} °C\n"
-            f"Cluster: {cluster}\n"
+            f"Humidity: {humidity:.1f} %\n"
             f"Samples: {samples}\n"
+            f"Model confidence: {model_conf:.1%}\n\n"
         )
+        self.model_ref.load_rls(str(key))
+        msg += self.model_ref.get_coefficients_report(str(key))
         self.info_dialog.set_info(msg)
         self.info_dialog.show()
         self.info_dialog.raise_()
@@ -978,6 +1060,7 @@ class OverlayUI(QtWidgets.QWidget):
             [
                 f"<span style='color:#B8E0FF'>Track: {track_name} ({track_config})</span>",
                 f"<span style='color:#B8E0FF'>Car: {car_path}</span>",
+                f"<span style='color:#FFD166'>Model confidence: {self.state.get('model_confidence', 0.0):.0%}</span>",
                 f"<span style='color:{'#7CFC00' if connected else '#FF4C4C'}'>SDK: {'ONLINE' if connected else 'OFFLINE'}</span>",
             ]
         )
@@ -1008,7 +1091,7 @@ class OverlayUI(QtWidgets.QWidget):
                 tread={t: 100.0 for t in TIRE_KEYS},
                 wear_per_lap={t: 0.0 for t in TIRE_KEYS},
                 key="",
-                cluster="normal",
+                model_confidence=0.0,
                 sample_count=0,
                 estimate_ready=False,
                 reset_requested=True,
@@ -1048,10 +1131,11 @@ class MainApp:
             "estimate_ready": False,
             "connected": False,
             "key": "",
-            "cluster": "normal",
+            "model_confidence": 0.0,
             "sample_count": 0,
             "track_temp": 0.0,
             "air_temp": 0.0,
+            "humidity": 0.0,
             "track_name": "",
             "track_config": "",
             "car_path": "",
