@@ -426,6 +426,23 @@ class TractionCircleOverlay:
             return "piora"
         return "estável"
 
+    @staticmethod
+    def _lapdist_hint(start_percent: float, end_percent: float, peak_percent: float) -> str:
+        def phase_label(value: float) -> str:
+            if value < 1.0 / 3.0:
+                return "início"
+            if value < 2.0 / 3.0:
+                return "meio"
+            return "fim"
+
+        start_pct = start_percent * 100.0
+        end_pct = end_percent * 100.0
+        peak_pct = peak_percent * 100.0
+        return (
+            f"LapDistPct {start_pct:.1f}%→{end_pct:.1f}% "
+            f"(pico em {peak_pct:.1f}% / {phase_label(peak_percent)} da volta)"
+        )
+
     def _detect_underuse_segments(self, valid_laps: Sequence[LapData], reference: Sequence[float]) -> List[UnderuseSegment]:
         if not valid_laps:
             return []
@@ -517,6 +534,7 @@ class TractionCircleOverlay:
                 f"• {seg.start_percent*100:.1f}-{seg.end_percent*100:.1f}% | Δ{seg.delta_g:.2f}g | "
                 f"{seg.phase} | tendência: {seg.trend} | consistência: {seg.consistency:.0f}%"
             )
+            lines.append(f"  ↳ {TractionCircleOverlay._lapdist_hint(seg.start_percent, seg.end_percent, seg.peak_percent)}")
 
         if compact_mode:
             lines.append("\nCompacto: exibindo apenas principais oportunidades.")
@@ -529,6 +547,7 @@ class TractionCircleOverlay:
                 f"(pico {seg.peak_percent*100:.1f}%): ref {seg.reference_g:.2f}g / atual {seg.achieved_g:.2f}g / "
                 f"Δ{seg.delta_g:.2f}g / severidade {seg.severity} / confiança {'alta' if seg.confidence else 'baixa'}"
             )
+            lines.append(f"  {TractionCircleOverlay._lapdist_hint(seg.start_percent, seg.end_percent, seg.peak_percent)}")
             lines.append(f"  Fase {seg.phase}: {seg.recommendation}")
         return "\n".join(lines)
 
