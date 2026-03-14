@@ -16,6 +16,7 @@ Run:
 """
 from __future__ import annotations
 import json
+import logging
 import os
 import queue
 import re
@@ -28,6 +29,23 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 import irsdk
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+LOGGER = logging.getLogger("iracing_tire_overlay")
+_LOG_SITE_LAST: Dict[str, float] = {}
+
+
+def log_warning_limited(site: str, message: str, exc: Optional[Exception] = None, interval_s: float = 5.0):
+    now = time.time()
+    last = _LOG_SITE_LAST.get(site, 0.0)
+    if now - last < interval_s:
+        return
+    _LOG_SITE_LAST[site] = now
+    if exc is None:
+        LOGGER.warning("%s", message)
+    else:
+        LOGGER.warning("%s: %s", message, exc)
 
 
 MODEL_PATH = "iracing_tire_model.json"
@@ -84,15 +102,19 @@ class DataStorage:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
             return raw if isinstance(raw, dict) else {}
-        except Exception:
+        except Exception as exc:
+            log_warning_limited("storage_load", "Failed loading model storage", exc)
             return {}
 
     def save(self):
         with self.lock:
             tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2)
-            os.replace(tmp, self.path)
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(self.data, f, indent=2)
+                os.replace(tmp, self.path)
+            except Exception as exc:
+                log_warning_limited("storage_save", f"Failed saving model storage to {self.path}", exc)
 
     def get_samples(self, key: str) -> List[dict]:
         with self.lock:
@@ -181,6 +203,7 @@ class TireMLModel:
     def __init__(self, storage: DataStorage):
         self.storage = storage
         self._rls: Dict[str, RLSEstimator] = {t: RLSEstimator() for t in TIRE_KEYS}
+        self._dirty_keys: set[str] = set()
 
     @staticmethod
     def _rls_key(dataset_key: str) -> str:
@@ -195,7 +218,14 @@ class TireMLModel:
     def save_rls(self, dataset_key: str):
         with self.storage.lock:
             self.storage.data[self._rls_key(dataset_key)] = {t: self._rls[t].to_dict() for t in TIRE_KEYS}
+
+    def flush_pending(self):
+        if not self._dirty_keys:
+            return
+        for key in list(self._dirty_keys):
+            self.save_rls(key)
         self.storage.save()
+        self._dirty_keys.clear()
 
     def add_stint_sample(self, dataset_key: str, sample: dict):
         self.storage.add_sample(dataset_key, sample)
@@ -207,7 +237,7 @@ class TireMLModel:
         )
         for tire in TIRE_KEYS:
             self._rls[tire].update(x, float(sample[tire]))
-        self.save_rls(dataset_key)
+        self._dirty_keys.add(dataset_key)
 
     def is_outlier(self, dataset_key: str, candidate: dict) -> bool:
         x = _phi(
@@ -304,7 +334,10 @@ class StintTracker:
     @staticmethod
     def make_dataset_key(s: TelemetrySnapshot) -> str:
         def clean(text: str, fallback: str) -> str:
-            return (text or fallback).strip().lower().replace(" ", "_")
+            raw = (text or "").strip().lower()
+            slug = re.sub(r"[^a-z0-9]+", "_", raw)
+            slug = re.sub(r"_+", "_", slug).strip("_")
+            return slug or fallback
 
         track = clean(s.track_name, "unknown_track")
         config = clean(s.track_config, "default")
@@ -405,6 +438,7 @@ class StintTracker:
                 "min_speed_kmh": self.min_speed_kmh,
                 "track_temp": float(snapshot.track_temp),
                 "air_temp": float(snapshot.air_temp),
+                "humidity": float(snapshot.humidity),
                 "energy_per_lap": float(energy_per_lap),
                 "wear_per_lap": wear_per_lap,
                 "wear_per_energy": wear_per_energy,
@@ -475,14 +509,16 @@ class TelemetryReader(threading.Thread):
     def _safe_float(v, default=0.0) -> float:
         try:
             return float(v) if v is not None else float(default)
-        except Exception:
+        except Exception as exc:
+            log_warning_limited("telemetry_safe_float", "Telemetry float conversion failed", exc, interval_s=10.0)
             return float(default)
 
     @staticmethod
     def _safe_int(v, default=0) -> int:
         try:
             return int(v) if v is not None else int(default)
-        except Exception:
+        except Exception as exc:
+            log_warning_limited("telemetry_safe_int", "Telemetry int conversion failed", exc, interval_s=10.0)
             return int(default)
 
     def _connected(self) -> bool:
@@ -490,7 +526,8 @@ class TelemetryReader(threading.Thread):
             if not getattr(self.ir, "is_initialized", False):
                 self.ir.startup()
             return bool(getattr(self.ir, "is_connected", False))
-        except Exception:
+        except Exception as exc:
+            log_warning_limited("telemetry_connected", "Failed checking iRacing connection", exc)
             return False
 
     def _parse_metadata(self) -> Dict[str, str]:
@@ -508,8 +545,8 @@ class TelemetryReader(threading.Thread):
                     self.last_meta["TrackName"] = prettify(track_name)
                 if track_config:
                     self.last_meta["TrackConfigName"] = prettify(track_config)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warning_limited("metadata_weekend", "WeekendInfo metadata parse failed", exc)
 
         try:
             driver_info = self.ir["DriverInfo"]
@@ -530,8 +567,8 @@ class TelemetryReader(threading.Thread):
                     ).strip()
                     if car_path:
                         self.last_meta["CarPath"] = prettify(car_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warning_limited("metadata_driver", "DriverInfo metadata parse failed", exc)
 
         if any(self.last_meta.values()):
             return self.last_meta
@@ -584,14 +621,14 @@ class TelemetryReader(threading.Thread):
 
                 if track_name or track_config or car_path:
                     return self.last_meta
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warning_limited("metadata_sessioninfo", "SessionInfo metadata parse failed", exc)
 
         text = ""
         try:
             text = self.ir.session_info
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warning_limited("metadata_session_text", "Session YAML metadata read failed", exc)
 
         if not text:
             return self.last_meta
@@ -666,8 +703,9 @@ class TelemetryReader(threading.Thread):
                 time.sleep(tick_s)
             except queue.Full:
                 time.sleep(tick_s)
-            except Exception:
+            except Exception as exc:
                 # Telemetry can disappear mid-session; keep looping.
+                log_warning_limited("telemetry_loop", "Telemetry read loop error", exc, interval_s=2.0)
                 time.sleep(0.2)
 
 
@@ -685,6 +723,8 @@ class ModelWorker(threading.Thread):
         self._last_key = ""
         self.stints = StintTracker()
         self.smoothed_wear_per_lap = {t: 0.0 for t in TIRE_KEYS}
+        self._last_flush_at = time.time()
+        self._save_interval_s = 3.0
 
     def _update_state(self, **kwargs):
         with self.state_lock:
@@ -699,6 +739,7 @@ class ModelWorker(threading.Thread):
             return True
 
     def _reset_runtime_memory(self):
+        self.model.flush_pending()
         self.storage.data = {}
         self.storage.save()
         self.stints = StintTracker()
@@ -711,6 +752,19 @@ class ModelWorker(threading.Thread):
             sample_count=0,
             estimate_ready=False,
         )
+
+    def _current_stint_laps_progress(self, snap: TelemetrySnapshot) -> float:
+        if not self.stints.start_data:
+            return 0.0
+        start_progress = float(self.stints.start_data.get("lap_progress", float(snap.lap) + float(snap.lap_dist_pct)))
+        current_progress = float(snap.lap) + float(snap.lap_dist_pct)
+        return max(0.0, current_progress - start_progress)
+
+    def _maybe_flush_model(self, force: bool = False):
+        now = time.time()
+        if force or now - self._last_flush_at >= self._save_interval_s:
+            self.model.flush_pending()
+            self._last_flush_at = now
 
     def run(self):
         while not self.stop_event.is_set():
@@ -728,13 +782,12 @@ class ModelWorker(threading.Thread):
 
             key = StintTracker.make_dataset_key(snap)
             if key != self._last_key:
+                self._maybe_flush_model(force=True)
                 self.model.load_rls(key)
                 self._last_key = key
 
-            live_laps_done = 0.0
-            if self.stints.last_snapshot is not None:
-                live_laps_done = self.stints.laps_in_stint(snap, self.stints.last_snapshot)
-            live_energy_per_lap = self.stints.current_energy / max(1.0, live_laps_done)
+            stint_laps_progress = self._current_stint_laps_progress(snap)
+            live_energy_per_lap = self.stints.current_energy / max(1.0, stint_laps_progress)
 
             rates_energy, model_confidence, sample_count = self.model.get_rates(
                 key,
@@ -784,6 +837,8 @@ class ModelWorker(threading.Thread):
             elif not has_base_samples:
                 self._update_state(wear_per_lap={t: 0.0 for t in TIRE_KEYS})
 
+            self._maybe_flush_model(force=False)
+
             if not stint_end:
                 continue
 
@@ -801,16 +856,19 @@ class ModelWorker(threading.Thread):
                 "rr": float(stint_end["wear_per_energy"]["rr"]),
             }
 
-            sample["humidity"] = float(stint_end.get("humidity", 50.0))
+            sample["humidity"] = float(stint_end.get("humidity", snap.humidity if snap is not None else 50.0))
 
             if self.model.is_outlier(str(stint_end["key"]), sample):
                 continue
 
             self.model.add_stint_sample(str(stint_end["key"]), sample)
+            self._maybe_flush_model(force=False)
             self._update_state(
                 sample_count=self.model.sample_count(key),
                 model_confidence=self.model._rls["lf"].confidence,
             )
+
+        self._maybe_flush_model(force=True)
 
 
 class InfoDialog(QtWidgets.QDialog):
@@ -990,8 +1048,8 @@ class OverlayUI(QtWidgets.QWidget):
                     loaded = json.load(f)
                 if isinstance(loaded, dict):
                     cfg.update(loaded)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warning_limited("settings_load", "Failed loading overlay settings", exc)
         return cfg
 
     def save_settings(self):
@@ -999,8 +1057,8 @@ class OverlayUI(QtWidgets.QWidget):
             with open(SETTINGS_PATH + ".tmp", "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, indent=2)
             os.replace(SETTINGS_PATH + ".tmp", SETTINGS_PATH)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_warning_limited("settings_save", "Failed saving overlay settings", exc)
 
     def apply_settings(self):
         flags = QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool
@@ -1066,9 +1124,13 @@ class OverlayUI(QtWidgets.QWidget):
             track_config = str(self.state.get("track_config", "") or "-")
             car_path = str(self.state.get("car_path", "") or "-")
             estimate_ready = bool(self.state.get("estimate_ready", False))
+            updated_at = float(self.state.get("updated_at", 0.0))
+
+        stale_age = time.time() - updated_at
+        is_stale = stale_age > 1.5
 
         lines = []
-        if estimate_ready:
+        if estimate_ready and not is_stale:
             lines.extend(
                 [
                     f"<span style='color:{self._color_for_value(tread.get('lf', 100.0))}'>LF {tread.get('lf', 100.0):5.1f}%</span>",
@@ -1083,6 +1145,11 @@ class OverlayUI(QtWidgets.QWidget):
                 f"<span style='color:#B8E0FF'>Track: {track_name} ({track_config})</span>",
                 f"<span style='color:#B8E0FF'>Car: {car_path}</span>",
                 f"<span style='color:#FFD166'>Model confidence: {self.state.get('model_confidence', 0.0):.0%}</span>",
+                (
+                    f"<span style='color:{'#FF9F1C' if is_stale else '#7CFC00'}'>"
+                    f"Data: {'STALE' if is_stale else 'LIVE'}"
+                    f"{f' ({stale_age:.1f}s)' if is_stale else ''}</span>"
+                ),
                 f"<span style='color:{'#7CFC00' if connected else '#FF4C4C'}'>SDK: {'ONLINE' if connected else 'OFFLINE'}</span>",
             ]
         )
@@ -1104,8 +1171,8 @@ class OverlayUI(QtWidgets.QWidget):
             try:
                 if os.path.exists(path):
                     os.remove(path)
-            except Exception:
-                pass
+            except Exception as exc:
+                log_warning_limited("reset_delete", f"Failed deleting {path}", exc)
 
         # Reset runtime overlay state.
         with self.state_lock:
