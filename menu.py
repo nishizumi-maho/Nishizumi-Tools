@@ -6,6 +6,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tkinter as tk
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox
@@ -35,16 +36,36 @@ class AppLauncher:
         return subprocess.Popen(command, cwd=self.base_dir)
 
     def _build_command(self, app: AppEntry) -> list[str]:
-        # Frozen build: try sibling executable first (e.g., Nishizumi_Fuel.exe),
-        # then fallback to script names in case all scripts are distributed together.
-        if getattr(sys, "frozen", False):
-            executable = self.base_dir / self._executable_name(app.script_name)
-            if executable.exists():
-                return [str(executable)]
+        runtime_dir = Path(getattr(sys, "_MEIPASS", self.base_dir))
 
-        script_path = self.base_dir / app.script_name
-        if script_path.exists():
-            return [sys.executable, str(script_path)]
+        # Frozen build: try executables from common output layouts first.
+        # This handles one-dir builds where overlay executables may live next
+        # to menu.exe or one level up in a shared output folder.
+        if getattr(sys, "frozen", False):
+            executable_name = self._executable_name(app.script_name)
+            exe_candidates = (
+                self.base_dir / executable_name,
+                self.base_dir.parent / executable_name,
+                runtime_dir / executable_name,
+            )
+            for executable in exe_candidates:
+                if executable.exists():
+                    return [str(executable)]
+
+            script_candidates = (
+                self.base_dir / app.script_name,
+                self.base_dir.parent / app.script_name,
+                runtime_dir / app.script_name,
+            )
+            python_exec = shutil.which("pythonw") or shutil.which("python")
+            if python_exec:
+                for script_path in script_candidates:
+                    if script_path.exists():
+                        return [python_exec, str(script_path)]
+        else:
+            script_path = self.base_dir / app.script_name
+            if script_path.exists():
+                return [sys.executable, str(script_path)]
 
         raise FileNotFoundError(
             f"Could not find '{app.script_name}' or an executable equivalent in {self.base_dir}."
