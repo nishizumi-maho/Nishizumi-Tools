@@ -89,13 +89,20 @@ class MenuApp:
 
         self.root = tk.Tk()
         self.root.title("Nishizumi Tools Menu")
-        self.root.geometry("520x300")
-        self.root.minsize(520, 300)
         self.root.configure(bg="#111827")
 
         self.status_var = tk.StringVar(value="Ready. Pick an app to start.")
         self._build_ui()
+        self._fit_window_to_content()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _fit_window_to_content(self) -> None:
+        """Resize the menu window so every row is always visible on open."""
+        self.root.update_idletasks()
+        width = max(520, self.root.winfo_reqwidth())
+        height = self.root.winfo_reqheight()
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(width, height)
 
     def _build_ui(self) -> None:
         title = tk.Label(
