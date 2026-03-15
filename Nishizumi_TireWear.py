@@ -6,7 +6,7 @@ Single-file application that:
 - Reads live telemetry from iRacing (irsdk) at 60 Hz
 - Detects stints and learns tire wear behavior over time
 - Uses driving load (|LatAccel| * Speed) and temperature modeling
-- Saves learned data by track+config+car into nishizumi_tirewear_model.json
+- Saves learned data by track+config+car into %APPDATA%/NishizumiTools (or ~/.config/NishizumiTools)
 - Shows a transparent overlay HUD and a settings/info menu (PyQt5)
 
 Install:
@@ -23,6 +23,7 @@ import signal
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -30,8 +31,17 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import irsdk
 
 
-MODEL_PATH = "nishizumi_tirewear_model.json"
-SETTINGS_PATH = "nishizumi_tirewear_settings.json"
+
+def _get_appdata_dir() -> Path:
+    root = Path(os.getenv("APPDATA") or Path.home() / ".config")
+    path = root / "NishizumiTools"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+APPDATA_DIR = _get_appdata_dir()
+MODEL_PATH = str(APPDATA_DIR / "nishizumi_tirewear_model.json")
+SETTINGS_PATH = str(APPDATA_DIR / "nishizumi_tirewear_settings.json")
 TIRE_KEYS = ("lf", "rf", "lr", "rr")
 WEAR_FIELDS = {
     "lf": ("LFwearL", "LFwearM", "LFwearR"),

@@ -84,7 +84,7 @@ additional fuel per lap that would cost a lap.
 
 - The window is always on top, slightly transparent, and frameless.
 - Dragging is disabled while the target is locked to prevent accidental moves.
-- Closing the window persists its position to `~/.fuel_consumption_monitor.json`.
+- Closing the window persists its position to `%APPDATA%/NishizumiTools/fuel_consumption_monitor.json` (or `~/.config/NishizumiTools/fuel_consumption_monitor.json` on non-Windows).
 
 ## Troubleshooting
 

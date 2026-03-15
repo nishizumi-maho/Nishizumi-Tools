@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import json
+import os
 from pathlib import Path
 import tkinter as tk
 from typing import Dict, List, Optional, Tuple
@@ -15,7 +16,16 @@ UPDATE_MS = 16
 DEFAULT_LAP_TIME_S = 90.0
 GREEN_GAP_S = 5.0
 YELLOW_GAP_S = 1.5
-RATE_FILE = Path(__file__).with_name("nishizumi_pittime_fuel_rates.json")
+
+
+def _get_appdata_dir() -> Path:
+    root = Path(os.getenv("APPDATA") or Path.home() / ".config")
+    path = root / "NishizumiTools"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+RATE_FILE = _get_appdata_dir() / "nishizumi_pittime_fuel_rates.json"
 
 
 class PitStopOverlay:

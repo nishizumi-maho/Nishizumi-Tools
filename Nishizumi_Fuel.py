@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sys
 import time
 import tkinter as tk
@@ -13,6 +14,13 @@ from pathlib import Path
 from typing import Optional
 
 import irsdk
+
+
+def _get_appdata_dir() -> Path:
+    root = Path(os.getenv("APPDATA") or Path.home() / ".config")
+    path = root / "NishizumiTools"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 @dataclass
@@ -67,7 +75,7 @@ class FuelConsumptionMonitor:
         self.show_advanced_var = tk.BooleanVar(value=False)
         self.advanced_toggle_text = tk.StringVar(value="I")
 
-        self._position_path = Path.home() / ".fuel_consumption_monitor.json"
+        self._position_path = _get_appdata_dir() / "fuel_consumption_monitor.json"
         self._apply_window_geometry(default_pos=(60, 60))
 
         self._plus_one_target: Optional[float] = None
