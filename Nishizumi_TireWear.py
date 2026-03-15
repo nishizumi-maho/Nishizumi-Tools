@@ -76,6 +76,18 @@ class DataStorage:
         self.path = path
         self.lock = threading.Lock()
         self.data = self._load()
+        self._ensure_model_file_exists()
+
+    def _ensure_model_file_exists(self):
+        """Create an empty model file so persistence is visible before first sample."""
+        if os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, indent=2)
+        except Exception:
+            # Non-fatal: learning can still proceed and save later.
+            pass
 
     def _load(self) -> Dict[str, dict]:
         if not os.path.exists(self.path):
