@@ -305,6 +305,7 @@ class StintTracker:
 
     MIN_LAPS = 2
     LAP_STD_THRESHOLD = 15.0
+    PIT_WEAR_RESET_THRESHOLD = 5.0
 
     def __init__(self):
         self.in_stint = False
@@ -320,6 +321,7 @@ class StintTracker:
         self.min_speed_kmh = float("inf")
         self.stopped_in_pit = False
         self.pit_tire_change_request = {t: False for t in TIRE_KEYS}
+        self.pit_entry_wear: Optional[Dict[str, float]] = None
 
     @staticmethod
     def make_dataset_key(s: TelemetrySnapshot) -> str:
@@ -366,6 +368,25 @@ class StintTracker:
         self.min_speed_kmh = speed_kmh
         self.stopped_in_pit = False
         self.pit_tire_change_request = {t: False for t in TIRE_KEYS}
+        self.pit_entry_wear = None
+
+    def _infer_pit_tire_changes_from_wear(self, current_wear: Dict[str, float]):
+        """Infer tire swaps by comparing pit entry wear versus current wear.
+
+        iRacing pit service checkboxes can briefly flip while service is applied,
+        so we also detect a tire change when tread unexpectedly increases while
+        on pit road (fresh tire reset behavior).
+        """
+
+        if not self.pit_entry_wear:
+            return
+
+        for tire in TIRE_KEYS:
+            before = float(self.pit_entry_wear.get(tire, 0.0))
+            now = float(current_wear.get(tire, before))
+            wear_gain = now - before
+            if wear_gain >= self.PIT_WEAR_RESET_THRESHOLD:
+                self.pit_tire_change_request[tire] = True
 
     def update(self, snapshot: TelemetrySnapshot) -> Optional[dict]:
         speed_kmh = snapshot.speed_mps * 3.6
@@ -375,8 +396,12 @@ class StintTracker:
             self.stopped_in_pit = True
 
         if snapshot.on_pit_road:
+            if self.pit_entry_wear is None:
+                self.pit_entry_wear = dict(snapshot.wear)
             for tire, bit in PIT_TIRE_CHANGE_FLAGS.items():
-                self.pit_tire_change_request[tire] = bool(int(snapshot.pit_sv_flags) & bit)
+                if bool(int(snapshot.pit_sv_flags) & bit):
+                    self.pit_tire_change_request[tire] = True
+            self._infer_pit_tire_changes_from_wear(snapshot.wear)
 
         # Driving load energy integration.
         if self.last_snapshot is not None:
