@@ -6,13 +6,13 @@ Single-file application that:
 - Reads live telemetry from iRacing (irsdk) at 60 Hz
 - Detects stints and learns tire wear behavior over time
 - Uses driving load (|LatAccel| * Speed) and temperature modeling
-- Saves learned data by track+config+car into iracing_tire_model.json
+- Saves learned data by track+config+car into nishizumi_tirewear_model.json
 - Shows a transparent overlay HUD and a settings/info menu (PyQt5)
 
 Install:
     pip install irsdk numpy pyqt5
 Run:
-    python iracing_tire_overlay.py
+    python Nishizumi_TireWear.py
 """
 from __future__ import annotations
 import json
@@ -30,8 +30,8 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import irsdk
 
 
-MODEL_PATH = "iracing_tire_model.json"
-SETTINGS_PATH = "iracing_tire_overlay_settings.json"
+MODEL_PATH = "nishizumi_tirewear_model.json"
+SETTINGS_PATH = "nishizumi_tirewear_settings.json"
 TIRE_KEYS = ("lf", "rf", "lr", "rr")
 WEAR_FIELDS = {
     "lf": ("LFwearL", "LFwearM", "LFwearR"),

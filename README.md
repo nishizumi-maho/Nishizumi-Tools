@@ -1,54 +1,97 @@
-# Nishizumi Fuel
+# Nishizumi Tools
 
-Nishizumi Fuel is a lightweight Tkinter overlay that monitors fuel usage in iRacing and
-surfaces live fuel-per-lap, remaining laps, and stint planning insights. It listens to iRacing
-telemetry via the `irsdk` Python bindings and keeps a small always-on-top window you can drag
-around your screen.
+Nishizumi Tools is now a **tool collection repository** for iRacing overlays and telemetry helpers.
+It includes multiple standalone Python apps focused on fuel planning, tire wear learning, pit-stop strategy,
+and traction analysis.
 
-## Features
+## Included apps
 
-- Live fuel-per-lap average with delta vs. target.
-- Remaining laps estimate based on current fuel usage.
-- Stint planning with planned vs. expected laps.
-- Advanced insights for +1/-1 lap targets and per-lap savings.
-- Automatic refuel detection and stint reset.
-- Persists window position between launches.
+### 1) Nishizumi Fuel (`Nishizumi_Fuel.py`)
+A lightweight Tkinter overlay for fuel strategy.
+
+**What it does**
+- Tracks live fuel-per-lap usage.
+- Estimates remaining laps from current fuel.
+- Shows stint planning insights with configurable target consumption.
+- Detects refuels and resets stint tracking automatically.
+
+**Run**
+```bash
+python Nishizumi_Fuel.py
+```
+
+---
+
+### 2) Nishizumi TireWear (`Nishizumi_TireWear.py`)
+A PyQt5 overlay that learns tire wear behavior from live telemetry.
+
+**What it does**
+- Reads iRacing telemetry at high frequency.
+- Learns tire wear trends per tire over stints.
+- Uses load and environmental variables (track temp, air temp, humidity).
+- Persists learned model data by track/config/car in JSON.
+
+**Run**
+```bash
+python Nishizumi_TireWear.py
+```
+
+---
+
+### 3) Nishizumi PitTime (`Nishizumi_PitTime.py`)
+A Tkinter pit-stop loss and rejoin safety estimator.
+
+**What it does**
+- Estimates total pit time loss (base + tires + fueling).
+- Displays pit window and rejoin safety status.
+- Supports fuel-rate profiling and optional custom fuel max.
+- Includes compact/minimal mode for quick in-race use.
+
+**Run**
+```bash
+python Nishizumi_PitTime.py
+```
+
+---
+
+### 4) Nishizumi Traction (`Nishizumi_Traction.py`)
+A traction-circle telemetry overlay with coaching-focused feedback.
+
+**What it does**
+- Visualizes real-time traction circle from longitudinal/lateral acceleration.
+- Learns reference grip usage from valid laps.
+- Detects underuse segments and provides improvement hints.
+- Can load external IBT reference data or use live adaptive reference.
+
+**Run**
+```bash
+python Nishizumi_Traction.py
+```
 
 ## Requirements
 
 - Python 3.10+
 - iRacing running with telemetry enabled
-- `irsdk` Python package available in your environment
+- Python packages:
+  - `irsdk` (all tools)
+  - `numpy` + `pyqt5` (TireWear)
+  - `tkinter` (Fuel, PitTime, Traction; included with most Python installs)
 
-## Quick start
+## Notes
 
-```bash
-python Nishizumi_Fuel.py
-```
-
-Launch iRacing first, then run the script. The overlay waits for telemetry and updates once
-it detects live data.
-
-## Controls
-
-- **Drag**: Click-and-drag the window background to reposition it.
-- **Target L/Lap**: Set a fuel-per-lap target for stint planning.
-- **Lock**: Freeze the target value and prevent dragging via the window.
-- **Reset**: Clear stint tracking and averages.
-- **Insights**: Expand advanced stint planning details.
-
-## Configuration & files
-
-- Window position is saved to `~/.fuel_consumption_monitor.json` on close.
-- Telemetry is read from iRacing session data; no additional config files are required.
+- These tools are standalone scripts; run the one you need.
+- Most overlays are always-on-top windows intended for race sessions.
+- Some tools persist local settings/model data JSON files next to the script or in your home directory.
 
 ## Documentation
 
-For detailed behavior, telemetry sources, and calculation notes, see
-[`DOCUMENTATION.md`](DOCUMENTATION.md).
+- See [`DOCUMENTATION.md`](DOCUMENTATION.md) for detailed fuel overlay behavior.
 
 ## Repository structure
 
-- `Nishizumi_Fuel.py`: Main Tkinter overlay and telemetry logic.
-- `README.md`: Project overview and usage.
-- `DOCUMENTATION.md`: Detailed technical documentation.
+- `Nishizumi_Fuel.py`
+- `Nishizumi_TireWear.py`
+- `Nishizumi_PitTime.py`
+- `Nishizumi_Traction.py`
+- `README.md`
+- `DOCUMENTATION.md`
