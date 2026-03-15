@@ -6,13 +6,13 @@ Single-file application that:
 - Reads live telemetry from iRacing (irsdk) at 60 Hz
 - Detects stints and learns tire wear behavior over time
 - Uses driving load (|LatAccel| * Speed) and temperature modeling
-- Saves learned data by track+config+car into nishizumi_tirewear_model.json
+- Saves learned data by track+config+car into iracing_tire_model.json
 - Shows a transparent overlay HUD and a settings/info menu (PyQt5)
 
 Install:
     pip install irsdk numpy pyqt5
 Run:
-    python Nishizumi_TireWear.py
+    python iracing_tire_overlay.py
 """
 from __future__ import annotations
 import json
@@ -30,8 +30,8 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import irsdk
 
 
-MODEL_PATH = "nishizumi_tirewear_model.json"
-SETTINGS_PATH = "nishizumi_tirewear_settings.json"
+MODEL_PATH = "iracing_tire_model.json"
+SETTINGS_PATH = "iracing_tire_overlay_settings.json"
 TIRE_KEYS = ("lf", "rf", "lr", "rr")
 WEAR_FIELDS = {
     "lf": ("LFwearL", "LFwearM", "LFwearR"),
@@ -45,12 +45,6 @@ INNER_WEAR_INDEX = {
     "rf": 0,
     "lr": 2,
     "rr": 0,
-}
-PIT_TIRE_CHANGE_FLAGS = {
-    "lf": 0x0001,
-    "rf": 0x0002,
-    "lr": 0x0004,
-    "rr": 0x0008,
 }
 
 
@@ -69,7 +63,6 @@ class TelemetrySnapshot:
     track_temp: float
     air_temp: float
     humidity: float
-    pit_sv_flags: int
     wear: Dict[str, float]
     track_name: str
     track_config: str
@@ -83,18 +76,6 @@ class DataStorage:
         self.path = path
         self.lock = threading.Lock()
         self.data = self._load()
-        self._ensure_model_file_exists()
-
-    def _ensure_model_file_exists(self):
-        """Create an empty model file so persistence is visible before first sample."""
-        if os.path.exists(self.path):
-            return
-        try:
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, indent=2)
-        except Exception:
-            # Non-fatal: learning can still proceed and save later.
-            pass
 
     def _load(self) -> Dict[str, dict]:
         if not os.path.exists(self.path):
@@ -319,7 +300,6 @@ class StintTracker:
         self.lap_times: List[float] = []
         self.min_speed_kmh = float("inf")
         self.stopped_in_pit = False
-        self.pit_tire_change_request = {t: False for t in TIRE_KEYS}
 
     @staticmethod
     def make_dataset_key(s: TelemetrySnapshot) -> str:
@@ -346,11 +326,8 @@ class StintTracker:
     def _start_stint(self, snapshot: TelemetrySnapshot, speed_kmh: float):
         """Initialize a new stint from the current telemetry snapshot."""
 
-        start_wear = dict(snapshot.wear)
-        if self.stopped_in_pit:
-            for tire in TIRE_KEYS:
-                if self.pit_tire_change_request.get(tire, False):
-                    start_wear[tire] = 100.0
+        fresh_tires = bool(self.stopped_in_pit)
+        start_wear = {t: 100.0 for t in TIRE_KEYS} if fresh_tires else dict(snapshot.wear)
         self.in_stint = True
         self.start_data = {
             "wear": start_wear,
@@ -365,7 +342,6 @@ class StintTracker:
         self.lap_times = []
         self.min_speed_kmh = speed_kmh
         self.stopped_in_pit = False
-        self.pit_tire_change_request = {t: False for t in TIRE_KEYS}
 
     def update(self, snapshot: TelemetrySnapshot) -> Optional[dict]:
         speed_kmh = snapshot.speed_mps * 3.6
@@ -373,10 +349,6 @@ class StintTracker:
 
         if snapshot.on_pit_road and speed_kmh < 1.0:
             self.stopped_in_pit = True
-
-        if snapshot.on_pit_road:
-            for tire, bit in PIT_TIRE_CHANGE_FLAGS.items():
-                self.pit_tire_change_request[tire] = bool(int(snapshot.pit_sv_flags) & bit)
 
         # Driving load energy integration.
         if self.last_snapshot is not None:
@@ -685,7 +657,6 @@ class TelemetryReader(threading.Thread):
                     track_temp=self._safe_float(self.ir["TrackTemp"], 0.0),
                     air_temp=self._safe_float(self.ir["AirTemp"], 0.0),
                     humidity=self._safe_float(self.ir["RelativeHumidity"], 0.0),
-                    pit_sv_flags=self._safe_int(self.ir["PitSvFlags"], 0),
                     wear=wear,
                     track_name=meta.get("TrackName", ""),
                     track_config=meta.get("TrackConfigName", ""),
@@ -962,7 +933,6 @@ class OverlayUI(QtWidgets.QWidget):
 
         self.label = QtWidgets.QLabel(self)
         self.label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
-        self.label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
 
         self.btn_info = QtWidgets.QPushButton("ℹ", self)
         self.btn_info.setFixedWidth(28)
@@ -972,15 +942,10 @@ class OverlayUI(QtWidgets.QWidget):
         self.btn_settings.setFixedWidth(28)
         self.btn_settings.clicked.connect(self.open_settings)
 
-        self.btn_close_overlay = QtWidgets.QPushButton("✕", self)
-        self.btn_close_overlay.setFixedWidth(28)
-        self.btn_close_overlay.clicked.connect(QtWidgets.QApplication.quit)
-
         top_row = QtWidgets.QHBoxLayout()
         top_row.addStretch(1)
         top_row.addWidget(self.btn_info)
         top_row.addWidget(self.btn_settings)
-        top_row.addWidget(self.btn_close_overlay)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(top_row)
@@ -1124,14 +1089,14 @@ class OverlayUI(QtWidgets.QWidget):
         self.label.setText("<br>".join(lines))
 
     def reset_all_data(self):
-        confirm_box = self._build_light_message_box(
-            icon=QtWidgets.QMessageBox.Warning,
-            title="Reset data",
-            text="This will clear learned tire model data and current session memory. Continue?",
-            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            default_button=QtWidgets.QMessageBox.No,
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Reset data",
+            "This will clear learned tire model data and current session memory. Continue?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
         )
-        if confirm_box.exec_() != QtWidgets.QMessageBox.Yes:
+        if answer != QtWidgets.QMessageBox.Yes:
             return
 
         # Clear persisted model samples.
@@ -1154,52 +1119,7 @@ class OverlayUI(QtWidgets.QWidget):
                 reset_requested=True,
             )
 
-        done_box = self._build_light_message_box(
-            icon=QtWidgets.QMessageBox.Information,
-            title="Reset complete",
-            text="All learned data was cleared.",
-            buttons=QtWidgets.QMessageBox.Ok,
-            default_button=QtWidgets.QMessageBox.Ok,
-        )
-        done_box.exec_()
-
-    def _build_light_message_box(
-        self,
-        icon: QtWidgets.QMessageBox.Icon,
-        title: str,
-        text: str,
-        buttons: QtWidgets.QMessageBox.StandardButtons,
-        default_button: QtWidgets.QMessageBox.StandardButton,
-    ) -> QtWidgets.QMessageBox:
-        box = QtWidgets.QMessageBox(self)
-        box.setIcon(icon)
-        box.setWindowTitle(title)
-        box.setText(text)
-        box.setStandardButtons(buttons)
-        box.setDefaultButton(default_button)
-        box.setStyleSheet(
-            """
-            QMessageBox {
-                background-color: white;
-                color: black;
-            }
-            QLabel {
-                color: black;
-                background: transparent;
-            }
-            QPushButton {
-                background-color: white;
-                color: black;
-                border: 1px solid #BDBDBD;
-                padding: 4px 10px;
-                min-width: 72px;
-            }
-            QPushButton:hover {
-                background-color: #F2F2F2;
-            }
-            """
-        )
-        return box
+        QtWidgets.QMessageBox.information(self, "Reset complete", "All learned data was cleared.")
 
     def mousePressEvent(self, e: QtGui.QMouseEvent):
         if e.button() == QtCore.Qt.LeftButton:
