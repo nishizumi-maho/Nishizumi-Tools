@@ -400,47 +400,47 @@ class TractionCircleOverlay:
     @staticmethod
     def _phase_and_recommendation(neg_long: float, lat: float, pos_long: float) -> Tuple[str, str]:
         if neg_long > max(lat, pos_long):
-            return "Entrada", "Frear 5-10m mais tarde ou reduzir pressão inicial de freio."
+            return "Entry", "Brake 5-10m later or reduce initial brake pressure."
         if lat >= max(neg_long, pos_long):
-            return "Meio", "Carregar mais velocidade no apex mantendo estabilidade."
-        return "Saída", "Aplicar throttle progressivamente mais cedo na saída."
+            return "Mid-corner", "Carry more speed at the apex while maintaining stability."
+        return "Exit", "Apply throttle progressively earlier on corner exit."
 
     @staticmethod
     def _severity_label(delta_g: float) -> str:
         if delta_g >= 0.25:
-            return "alta"
+            return "high"
         if delta_g >= 0.12:
-            return "média"
-        return "baixa"
+            return "medium"
+        return "low"
 
     @staticmethod
     def _trend_label(values: Sequence[float]) -> str:
         if len(values) < 3:
-            return "estável"
+            return "stable"
         split = max(1, len(values) // 2)
         first = statistics.mean(values[:split])
         second = statistics.mean(values[split:])
         if second - first > 0.03:
-            return "melhora"
+            return "improving"
         if second - first < -0.03:
-            return "piora"
-        return "estável"
+            return "declining"
+        return "stable"
 
     @staticmethod
     def _lapdist_hint(start_percent: float, end_percent: float, peak_percent: float) -> str:
         def phase_label(value: float) -> str:
             if value < 1.0 / 3.0:
-                return "início"
+                return "start"
             if value < 2.0 / 3.0:
-                return "meio"
-            return "fim"
+                return "middle"
+            return "end"
 
         start_pct = start_percent * 100.0
         end_pct = end_percent * 100.0
         peak_pct = peak_percent * 100.0
         return (
             f"LapDistPct {start_pct:.1f}%→{end_pct:.1f}% "
-            f"(pico em {peak_pct:.1f}% / {phase_label(peak_percent)} da volta)"
+            f"(peak at {peak_pct:.1f}% / {phase_label(peak_percent)} of lap)"
         )
 
     def _detect_underuse_segments(self, valid_laps: Sequence[LapData], reference: Sequence[float]) -> List[UnderuseSegment]:
@@ -525,30 +525,30 @@ class TractionCircleOverlay:
     @staticmethod
     def _format_summary(segments: Sequence[UnderuseSegment], compact_mode: bool) -> str:
         if not segments:
-            return "Sem oportunidades robustas ainda. Complete mais voltas válidas."
+            return "No robust opportunities yet. Complete more valid laps."
 
         top3 = list(segments[:3])
-        lines = ["Top 3 oportunidades (ordenadas por Δg):"]
+        lines = ["Top 3 opportunities (sorted by Δg):"]
         for seg in top3:
             lines.append(
                 f"• {seg.start_percent*100:.1f}-{seg.end_percent*100:.1f}% | Δ{seg.delta_g:.2f}g | "
-                f"{seg.phase} | tendência: {seg.trend} | consistência: {seg.consistency:.0f}%"
+                f"{seg.phase} | trend: {seg.trend} | consistency: {seg.consistency:.0f}%"
             )
             lines.append(f"  ↳ {TractionCircleOverlay._lapdist_hint(seg.start_percent, seg.end_percent, seg.peak_percent)}")
 
         if compact_mode:
-            lines.append("\nCompacto: exibindo apenas principais oportunidades.")
+            lines.append("\nCompact: showing only main opportunities.")
             return "\n".join(lines)
 
-        lines.append("\nDetalhado:")
+        lines.append("\nDetailed:")
         for seg in segments:
             lines.append(
                 f"- {seg.start_percent*100:.1f}-{seg.end_percent*100:.1f}% "
-                f"(pico {seg.peak_percent*100:.1f}%): ref {seg.reference_g:.2f}g / atual {seg.achieved_g:.2f}g / "
-                f"Δ{seg.delta_g:.2f}g / severidade {seg.severity} / confiança {'alta' if seg.confidence else 'baixa'}"
+                f"(peak {seg.peak_percent*100:.1f}%): ref {seg.reference_g:.2f}g / current {seg.achieved_g:.2f}g / "
+                f"Δ{seg.delta_g:.2f}g / severity {seg.severity} / confidence {'high' if seg.confidence else 'low'}"
             )
             lines.append(f"  {TractionCircleOverlay._lapdist_hint(seg.start_percent, seg.end_percent, seg.peak_percent)}")
-            lines.append(f"  Fase {seg.phase}: {seg.recommendation}")
+            lines.append(f"  Phase {seg.phase}: {seg.recommendation}")
         return "\n".join(lines)
 
     def _draw_circle(self, long_g: float, lat_g: float) -> None:
