@@ -68,6 +68,21 @@ A traction-circle telemetry overlay with coaching-focused feedback.
 python Nishizumi_Traction.py
 ```
 
+### 5) Tools Menu (`menu.py`)
+A simple English launcher UI to start any overlay with one click.
+
+**What it does**
+- Provides a single menu to launch Fuel, PitTime, TireWear, and Traction.
+- Uses a modular app registry, making it easy to add/remove tools.
+- Supports source runs (`python menu.py`) and frozen builds (tries sibling executables first).
+
+**Run**
+```bash
+python menu.py
+```
+
+---
+
 ## Requirements
 
 - Python 3.10+
@@ -79,7 +94,7 @@ python Nishizumi_Traction.py
 
 ## Notes
 
-- These tools are standalone scripts; run the one you need.
+- These tools are standalone scripts; run the one you need (or use `menu.py` to launch them).
 - Most overlays are always-on-top windows intended for race sessions.
 - Some tools persist local settings/model data JSON files next to the script or in your home directory.
 
@@ -93,5 +108,6 @@ python Nishizumi_Traction.py
 - `Nishizumi_TireWear.py`
 - `Nishizumi_PitTime.py`
 - `Nishizumi_Traction.py`
+- `menu.py`
 - `README.md`
 - `DOCUMENTATION.md`
