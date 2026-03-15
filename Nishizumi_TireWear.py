@@ -408,9 +408,11 @@ class StintTracker:
         if snapshot.on_pit_road:
             if self.pit_entry_wear is None:
                 self.pit_entry_wear = dict(snapshot.wear)
+            flags = int(snapshot.pit_sv_flags)
             for tire, bit in PIT_TIRE_CHANGE_FLAGS.items():
-                if bool(int(snapshot.pit_sv_flags) & bit):
-                    self.pit_tire_change_request[tire] = True
+                # Mirror the live pit checkbox state while stopped in pit.
+                # This allows last-second unchecks to cancel planned changes.
+                self.pit_tire_change_request[tire] = bool(flags & bit)
             self._infer_pit_tire_changes_from_wear(snapshot.wear)
 
         # Driving load energy integration.
