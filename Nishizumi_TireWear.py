@@ -933,6 +933,7 @@ class OverlayUI(QtWidgets.QWidget):
 
         self.label = QtWidgets.QLabel(self)
         self.label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        self.label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
 
         self.btn_info = QtWidgets.QPushButton("ℹ", self)
         self.btn_info.setFixedWidth(28)
@@ -942,10 +943,15 @@ class OverlayUI(QtWidgets.QWidget):
         self.btn_settings.setFixedWidth(28)
         self.btn_settings.clicked.connect(self.open_settings)
 
+        self.btn_close_overlay = QtWidgets.QPushButton("✕", self)
+        self.btn_close_overlay.setFixedWidth(28)
+        self.btn_close_overlay.clicked.connect(QtWidgets.QApplication.quit)
+
         top_row = QtWidgets.QHBoxLayout()
         top_row.addStretch(1)
         top_row.addWidget(self.btn_info)
         top_row.addWidget(self.btn_settings)
+        top_row.addWidget(self.btn_close_overlay)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(top_row)
