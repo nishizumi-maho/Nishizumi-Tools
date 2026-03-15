@@ -46,6 +46,12 @@ INNER_WEAR_INDEX = {
     "lr": 2,
     "rr": 0,
 }
+PIT_TIRE_CHANGE_FLAGS = {
+    "lf": 0x0001,
+    "rf": 0x0002,
+    "lr": 0x0004,
+    "rr": 0x0008,
+}
 
 
 @dataclass
@@ -63,6 +69,7 @@ class TelemetrySnapshot:
     track_temp: float
     air_temp: float
     humidity: float
+    pit_sv_flags: int
     wear: Dict[str, float]
     track_name: str
     track_config: str
@@ -318,6 +325,7 @@ class StintTracker:
         self.lap_times: List[float] = []
         self.min_speed_kmh = float("inf")
         self.stopped_in_pit = False
+        self.pit_tire_change_request = {t: False for t in TIRE_KEYS}
 
     @staticmethod
     def make_dataset_key(s: TelemetrySnapshot) -> str:
@@ -344,8 +352,11 @@ class StintTracker:
     def _start_stint(self, snapshot: TelemetrySnapshot, speed_kmh: float):
         """Initialize a new stint from the current telemetry snapshot."""
 
-        fresh_tires = bool(self.stopped_in_pit)
-        start_wear = {t: 100.0 for t in TIRE_KEYS} if fresh_tires else dict(snapshot.wear)
+        start_wear = dict(snapshot.wear)
+        if self.stopped_in_pit:
+            for tire in TIRE_KEYS:
+                if self.pit_tire_change_request.get(tire, False):
+                    start_wear[tire] = 100.0
         self.in_stint = True
         self.start_data = {
             "wear": start_wear,
@@ -360,6 +371,7 @@ class StintTracker:
         self.lap_times = []
         self.min_speed_kmh = speed_kmh
         self.stopped_in_pit = False
+        self.pit_tire_change_request = {t: False for t in TIRE_KEYS}
 
     def update(self, snapshot: TelemetrySnapshot) -> Optional[dict]:
         speed_kmh = snapshot.speed_mps * 3.6
@@ -367,6 +379,10 @@ class StintTracker:
 
         if snapshot.on_pit_road and speed_kmh < 1.0:
             self.stopped_in_pit = True
+
+        if snapshot.on_pit_road:
+            for tire, bit in PIT_TIRE_CHANGE_FLAGS.items():
+                self.pit_tire_change_request[tire] = bool(int(snapshot.pit_sv_flags) & bit)
 
         # Driving load energy integration.
         if self.last_snapshot is not None:
@@ -675,6 +691,7 @@ class TelemetryReader(threading.Thread):
                     track_temp=self._safe_float(self.ir["TrackTemp"], 0.0),
                     air_temp=self._safe_float(self.ir["AirTemp"], 0.0),
                     humidity=self._safe_float(self.ir["RelativeHumidity"], 0.0),
+                    pit_sv_flags=self._safe_int(self.ir["PitSvFlags"], 0),
                     wear=wear,
                     track_name=meta.get("TrackName", ""),
                     track_config=meta.get("TrackConfigName", ""),
