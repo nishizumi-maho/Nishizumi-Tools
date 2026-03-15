@@ -1089,14 +1089,14 @@ class OverlayUI(QtWidgets.QWidget):
         self.label.setText("<br>".join(lines))
 
     def reset_all_data(self):
-        answer = QtWidgets.QMessageBox.question(
-            self,
-            "Reset data",
-            "This will clear learned tire model data and current session memory. Continue?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No,
+        confirm_box = self._build_light_message_box(
+            icon=QtWidgets.QMessageBox.Warning,
+            title="Reset data",
+            text="This will clear learned tire model data and current session memory. Continue?",
+            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            default_button=QtWidgets.QMessageBox.No,
         )
-        if answer != QtWidgets.QMessageBox.Yes:
+        if confirm_box.exec_() != QtWidgets.QMessageBox.Yes:
             return
 
         # Clear persisted model samples.
@@ -1119,7 +1119,52 @@ class OverlayUI(QtWidgets.QWidget):
                 reset_requested=True,
             )
 
-        QtWidgets.QMessageBox.information(self, "Reset complete", "All learned data was cleared.")
+        done_box = self._build_light_message_box(
+            icon=QtWidgets.QMessageBox.Information,
+            title="Reset complete",
+            text="All learned data was cleared.",
+            buttons=QtWidgets.QMessageBox.Ok,
+            default_button=QtWidgets.QMessageBox.Ok,
+        )
+        done_box.exec_()
+
+    def _build_light_message_box(
+        self,
+        icon: QtWidgets.QMessageBox.Icon,
+        title: str,
+        text: str,
+        buttons: QtWidgets.QMessageBox.StandardButtons,
+        default_button: QtWidgets.QMessageBox.StandardButton,
+    ) -> QtWidgets.QMessageBox:
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setStandardButtons(buttons)
+        box.setDefaultButton(default_button)
+        box.setStyleSheet(
+            """
+            QMessageBox {
+                background-color: white;
+                color: black;
+            }
+            QLabel {
+                color: black;
+                background: transparent;
+            }
+            QPushButton {
+                background-color: white;
+                color: black;
+                border: 1px solid #BDBDBD;
+                padding: 4px 10px;
+                min-width: 72px;
+            }
+            QPushButton:hover {
+                background-color: #F2F2F2;
+            }
+            """
+        )
+        return box
 
     def mousePressEvent(self, e: QtGui.QMouseEvent):
         if e.button() == QtCore.Qt.LeftButton:
