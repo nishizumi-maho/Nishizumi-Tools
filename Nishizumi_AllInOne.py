@@ -274,6 +274,7 @@ class NishizumiLauncher:
             font=("Consolas", 10),
             bg="#171d26",
             fg="#f3f4f6",
+            disabledforeground="#f3f4f6",
             insertbackground="#f3f4f6",
             relief="flat",
             padx=12,
