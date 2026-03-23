@@ -104,23 +104,6 @@ class PitStopOverlay:
             bg=self.BG,
         ).pack(anchor="w")
 
-        self.minimal_button = tk.Button(
-            self.title_bar,
-            text="Minimal",
-            command=self._toggle_minimal_mode,
-            font=("Segoe UI", 9, "bold"),
-            bg="#1f2533",
-            fg=self.TEXT,
-            activebackground="#2b3447",
-            activeforeground="white",
-            relief="flat",
-            padx=10,
-            pady=2,
-            takefocus=False,
-            cursor="hand2",
-        )
-        self.minimal_button.pack(side="right")
-
         self.scroll_canvas = tk.Canvas(
             self.root,
             bg=self.BG,
@@ -211,17 +194,16 @@ class PitStopOverlay:
 
         self.restore_button = tk.Button(
             self.root,
-            text="⚙",
+            text="Return to full view",
             command=self._exit_minimal_mode,
-            font=("Segoe UI", 8, "bold"),
+            font=("Segoe UI", 9, "bold"),
             bg="#1f2533",
             fg=self.TEXT,
             activebackground="#2b3447",
             activeforeground="white",
             relief="flat",
-            width=2,
-            padx=0,
-            pady=0,
+            padx=10,
+            pady=4,
             takefocus=False,
             cursor="hand2",
         )
@@ -345,10 +327,6 @@ class PitStopOverlay:
         elif getattr(event, "num", None) == 5:
             self.scroll_canvas.yview_scroll(1, "units")
 
-    def _toggle_minimal_mode(self) -> None:
-        self.minimal_mode_var.set(not self.minimal_mode_var.get())
-        self._apply_minimal_mode()
-
     def _exit_minimal_mode(self) -> None:
         self.minimal_mode_var.set(False)
         self._apply_minimal_mode()
@@ -363,12 +341,11 @@ class PitStopOverlay:
             self.metrics_frame.pack_forget()
             self.status_details_label.pack_forget()
             self.legend_label.pack_forget()
-            self.restore_button.place(relx=1.0, x=-8, y=8, anchor="ne")
+            self.restore_button.place(relx=1.0, x=-10, y=10, anchor="ne")
             self.status_frame.configure(text="")
             self.status_frame.configure(padx=0, pady=0)
-            self.score_label.configure(padx=0, pady=6)
-            self.minimal_button.configure(text="Expanded")
-            self.root.geometry("320x72")
+            self.score_label.configure(padx=0, pady=(28, 6))
+            self.root.geometry("320x96")
             return
 
         self.title_bar.pack(fill="x", padx=10, pady=(8, 4))
@@ -383,7 +360,6 @@ class PitStopOverlay:
         self.score_label.configure(padx=12, pady=10)
         self.status_details_label.pack(anchor="w", pady=(10, 4))
         self.legend_label.pack(anchor="w")
-        self.minimal_button.configure(text="Minimal")
         self.root.geometry("500x440")
 
     def _row_entry(
