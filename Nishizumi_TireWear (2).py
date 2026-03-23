@@ -893,11 +893,11 @@ class InfoDialog(QtWidgets.QDialog):
         self.text.setStyleSheet(
             """
             QPlainTextEdit {
-                background-color: #FFFFFF;
-                color: #111111;
-                border: 1px solid #CFCFCF;
-                selection-background-color: #B8D9FF;
-                selection-color: #111111;
+                background-color: #1B1B1B;
+                color: #FFFFFF;
+                border: 1px solid #4A4A4A;
+                selection-background-color: #3E6EA8;
+                selection-color: #FFFFFF;
             }
             """
         )
@@ -911,18 +911,18 @@ class InfoDialog(QtWidgets.QDialog):
         self.setStyleSheet(
             """
             QDialog {
-                background-color: #F5F5F5;
-                color: #111111;
+                background-color: #202020;
+                color: #FFFFFF;
             }
             QPushButton {
-                background-color: #FFFFFF;
-                color: #111111;
-                border: 1px solid #BDBDBD;
+                background-color: #2A2A2A;
+                color: #FFFFFF;
+                border: 1px solid #5A5A5A;
                 padding: 4px 10px;
                 min-width: 72px;
             }
             QPushButton:hover {
-                background-color: #EAEAEA;
+                background-color: #3A3A3A;
             }
             """
         )
@@ -962,11 +962,11 @@ class QuickStartDialog(QtWidgets.QDialog):
         self.text.setStyleSheet(
             """
             QPlainTextEdit {
-                background-color: #FFFFFF;
-                color: #111111;
-                border: 1px solid #CFCFCF;
-                selection-background-color: #B8D9FF;
-                selection-color: #111111;
+                background-color: #1B1B1B;
+                color: #FFFFFF;
+                border: 1px solid #4A4A4A;
+                selection-background-color: #3E6EA8;
+                selection-color: #FFFFFF;
             }
             """
         )
@@ -980,18 +980,18 @@ class QuickStartDialog(QtWidgets.QDialog):
         self.setStyleSheet(
             """
             QDialog {
-                background-color: #F5F5F5;
-                color: #111111;
+                background-color: #202020;
+                color: #FFFFFF;
             }
             QPushButton {
-                background-color: #FFFFFF;
-                color: #111111;
-                border: 1px solid #BDBDBD;
+                background-color: #2A2A2A;
+                color: #FFFFFF;
+                border: 1px solid #5A5A5A;
                 padding: 4px 10px;
                 min-width: 72px;
             }
             QPushButton:hover {
-                background-color: #EAEAEA;
+                background-color: #3A3A3A;
             }
             """
         )
@@ -1004,6 +1004,7 @@ class SettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.parent_overlay = parent
         self.setWindowTitle("Tire Overlay - Settings")
+        self.setWindowFlag(QtCore.Qt.WindowContextHelpButtonHint, False)
 
         self.cb_on_top = QtWidgets.QCheckBox("Always on top")
         self.cb_on_top.setChecked(parent.settings["always_on_top"])
@@ -1025,6 +1026,10 @@ class SettingsDialog(QtWidgets.QDialog):
 
         btn_quick_start = QtWidgets.QPushButton("Quick start guide")
         btn_quick_start.clicked.connect(parent.open_quick_start)
+        btn_help = QtWidgets.QPushButton("?")
+        btn_help.setFixedWidth(32)
+        btn_help.setToolTip("Open the quick start guide")
+        btn_help.clicked.connect(parent.open_quick_start)
 
         btn_reset_data = QtWidgets.QPushButton("Reset data (clear memory)")
         btn_reset_data.clicked.connect(parent.reset_all_data)
@@ -1048,6 +1053,7 @@ class SettingsDialog(QtWidgets.QDialog):
         form.addRow("Overlay size", size_row)
 
         bottom = QtWidgets.QHBoxLayout()
+        bottom.addWidget(btn_help)
         bottom.addWidget(btn_quick_start)
         bottom.addWidget(btn_reset_data)
         bottom.addStretch(1)
