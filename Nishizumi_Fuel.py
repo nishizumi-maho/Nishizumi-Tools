@@ -458,10 +458,16 @@ class FuelConsumptionMonitor:
     def _parse_target(self) -> Optional[float]:
         return self._parse_target_with_units(self._display_units)
 
-    def _parse_target_with_units(self, display_units: Optional[int]) -> Optional[float]:
+    def _parse_decimal_input(self, value: str) -> Optional[float]:
+        normalized_value = value.strip().replace(",", ".")
         try:
-            value = float(self.target_var.get().strip())
+            return float(normalized_value)
         except ValueError:
+            return None
+
+    def _parse_target_with_units(self, display_units: Optional[int]) -> Optional[float]:
+        value = self._parse_decimal_input(self.target_var.get())
+        if value is None:
             return None
         if display_units == 0:
             return value / self.LITER_TO_GALLON
