@@ -3,7 +3,7 @@
 
 Features
 - Real-time traction circle from LongAccel and LatAccel.
-- Learns reference grip usage per LapDistPct bin from valid laps only.
+- Learns reference grip usage per LapDistPct bin from configurable coaching laps.
 - Detects robust underuse opportunities with session coaching insights.
 """
 
@@ -30,7 +30,15 @@ MIN_SAMPLES_PER_BIN = 5
 MAX_LAP_HISTORY = 1000
 RECENT_VALID_LAPS = 5
 TOGGLE_MODE_KEY = "m"
-MIN_LAPS_FOR_FEEDBACK = 5
+DEFAULT_LAPS_FOR_FEEDBACK = 5
+QUICKSTART_TEXT = """Quickstart
+1. Join a session and click Drive so telemetry starts streaming.
+2. Drive a few representative laps while keeping the car on track.
+3. Set how many completed laps should be collected before tips start.
+4. Decide whether those laps must be incident-free only or if every lap should count.
+5. Use the coaching panel to compare your current grip use to the learned or IBT reference.
+6. Press M to switch between compact and detailed coaching summaries.
+"""
 
 
 @dataclass
@@ -101,7 +109,12 @@ class TractionCircleOverlay:
         self.external_reference_bins: Optional[List[float]] = None
         self.external_reference_path: Optional[str] = None
 
+        self.laps_for_feedback_var = tk.IntVar(value=DEFAULT_LAPS_FOR_FEEDBACK)
+        self.incident_free_only_var = tk.BooleanVar(value=True)
+        self.quickstart_visible_var = tk.BooleanVar(value=True)
+
         self._build_ui()
+        self._refresh_feedback_settings()
         self.root.bind(f"<{TOGGLE_MODE_KEY}>", self._toggle_mode)
         self.root.bind(f"<{TOGGLE_MODE_KEY.upper()}>", self._toggle_mode)
 
@@ -116,8 +129,48 @@ class TractionCircleOverlay:
         ttk.Label(controls, text=f"  Toggle: '{TOGGLE_MODE_KEY.upper()}'", foreground="#4b5563").pack(side="left")
         ttk.Button(controls, text="Load IBT", command=self._load_ibt_reference).pack(side="right")
         ttk.Button(controls, text="Use Live", command=self._clear_ibt_reference).pack(side="right", padx=(0, 6))
+        ttk.Checkbutton(controls, text="Show quickstart", variable=self.quickstart_visible_var, command=self._toggle_quickstart).pack(side="right", padx=(0, 10))
 
         ttk.Label(container, textvariable=self.header_var, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+
+        self.quickstart_frame = ttk.LabelFrame(container, text="Quickstart", padding=10)
+        self.quickstart_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            self.quickstart_frame,
+            text=QUICKSTART_TEXT.strip(),
+            justify="left",
+            wraplength=840,
+            font=("Segoe UI", 9),
+        ).pack(anchor="w")
+
+        settings = ttk.LabelFrame(container, text="Coaching settings", padding=10)
+        settings.pack(fill="x", pady=(0, 8))
+
+        ttk.Label(settings, text="Start tips after this many laps:").grid(row=0, column=0, sticky="w")
+        self.laps_spinbox = ttk.Spinbox(
+            settings,
+            from_=1,
+            to=50,
+            width=5,
+            textvariable=self.laps_for_feedback_var,
+            command=self._refresh_feedback_settings,
+        )
+        self.laps_spinbox.grid(row=0, column=1, sticky="w", padx=(8, 16))
+        self.laps_spinbox.bind("<KeyRelease>", self._refresh_feedback_settings)
+        self.laps_spinbox.bind("<<Increment>>", self._refresh_feedback_settings)
+        self.laps_spinbox.bind("<<Decrement>>", self._refresh_feedback_settings)
+
+        ttk.Checkbutton(
+            settings,
+            text="Only count incident-free laps for learning and tips",
+            variable=self.incident_free_only_var,
+            command=self._refresh_feedback_settings,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.settings_hint_var = tk.StringVar(value="Tips start after 5 incident-free lap(s).")
+        ttk.Label(settings, textvariable=self.settings_hint_var, foreground="#4b5563").grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
 
         body = ttk.Frame(container)
         body.pack(fill="both", expand=True)
@@ -244,6 +297,10 @@ class TractionCircleOverlay:
             self.current_lap_num = next_lap_num
             return
         if next_lap_num == self.current_lap_num:
+            return
+
+        if self.current_lap_num < 0:
+            self.current_lap_num = next_lap_num
             return
 
         lap_time = self._safe_float(self._read_var("LapLastLapTime", 0.0), default=0.0)
@@ -389,13 +446,16 @@ class TractionCircleOverlay:
         self.external_reference_bins = bins
         self.external_reference_path = file_path
         self.reference_var.set(f"Reference: IBT {os.path.basename(file_path)}")
-        self.status_var.set("IBT reference loaded. Feedback starts after 5 valid laps.")
+        lap_target = self._feedback_lap_target()
+        lap_label = "incident-free" if self.incident_free_only_var.get() else "completed"
+        self.status_var.set(f"IBT reference loaded. Feedback starts after {lap_target} {lap_label} lap(s).")
 
     def _clear_ibt_reference(self) -> None:
         self.external_reference_bins = None
         self.external_reference_path = None
         self.reference_var.set("Reference: live adaptive")
-        self.status_var.set("Using live adaptive reference from your valid laps.")
+        lap_label = "incident-free" if self.incident_free_only_var.get() else "completed"
+        self.status_var.set(f"Using live adaptive reference from your {lap_label} laps.")
 
     @staticmethod
     def _phase_and_recommendation(neg_long: float, lat: float, pos_long: float) -> Tuple[str, str]:
@@ -523,9 +583,9 @@ class TractionCircleOverlay:
         return results
 
     @staticmethod
-    def _format_summary(segments: Sequence[UnderuseSegment], compact_mode: bool) -> str:
+    def _format_summary(segments: Sequence[UnderuseSegment], compact_mode: bool, lap_label: str) -> str:
         if not segments:
-            return "No clear coaching tips yet. Keep driving clean, valid laps so the app can learn your baseline."
+            return f"No clear coaching tips yet. Keep driving {lap_label} laps so the app can learn your baseline."
 
         top3 = list(segments[:3])
         lines = [
@@ -535,7 +595,7 @@ class TractionCircleOverlay:
         for seg in top3:
             lines.append(
                 f"• Lap {seg.start_percent*100:.1f}% to {seg.end_percent*100:.1f}% | Δ{seg.delta_g:.2f}g | "
-                f"{seg.phase} phase | trend: {seg.trend} | seen in {seg.consistency:.0f}% of valid laps"
+                f"{seg.phase} phase | trend: {seg.trend} | seen in {seg.consistency:.0f}% of {lap_label} laps"
             )
             lines.append(f"  ↳ {TractionCircleOverlay._lapdist_hint(seg.start_percent, seg.end_percent, seg.peak_percent)}")
             lines.append(f"  ↳ What to try next lap: {seg.recommendation}")
@@ -586,6 +646,27 @@ class TractionCircleOverlay:
         self.compact_mode = not self.compact_mode
         self.mode_var.set(f"Mode: {'compact' if self.compact_mode else 'detailed'}")
 
+    def _feedback_lap_target(self) -> int:
+        try:
+            laps = int(self.laps_for_feedback_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            laps = DEFAULT_LAPS_FOR_FEEDBACK
+        laps = max(1, min(50, laps))
+        if self.laps_for_feedback_var.get() != laps:
+            self.laps_for_feedback_var.set(laps)
+        return laps
+
+    def _toggle_quickstart(self) -> None:
+        if self.quickstart_visible_var.get():
+            self.quickstart_frame.pack(fill="x", pady=(0, 8), before=self.canvas.master)
+        else:
+            self.quickstart_frame.pack_forget()
+
+    def _refresh_feedback_settings(self, _event: object = None) -> None:
+        lap_target = self._feedback_lap_target()
+        lap_label = "incident-free" if self.incident_free_only_var.get() else "completed"
+        self.settings_hint_var.set(f"Tips start after {lap_target} {lap_label} lap(s).")
+
     def _update(self) -> None:
         connected = self.ir.startup() if not getattr(self.ir, "is_initialized", False) else True
         if not connected:
@@ -625,25 +706,28 @@ class TractionCircleOverlay:
         offtrack = self._is_offtrack(driver_idx)
         self._update_lap_storage(lap_num, lap_dist_pct, g_total, long_g, lat_g, offtrack)
 
-        valid_laps = [lap for lap in self.lap_history if lap.valid]
+        incident_free_only = self.incident_free_only_var.get()
+        coaching_laps = [lap for lap in self.lap_history if lap.valid] if incident_free_only else list(self.lap_history)
         if self.external_reference_bins is not None:
             reference = self.external_reference_bins
             self.outliers_removed_last = 0
             self.bin_confidence = [v >= MIN_REFERENCE_G for v in reference]
         else:
-            reference = self._compute_reference_by_bin(valid_laps)
+            reference = self._compute_reference_by_bin(coaching_laps)
 
-        if len(valid_laps) < MIN_LAPS_FOR_FEEDBACK:
-            laps_left = MIN_LAPS_FOR_FEEDBACK - len(valid_laps)
+        lap_target = self._feedback_lap_target()
+        laps_used_label = "incident-free" if incident_free_only else "completed"
+        if len(coaching_laps) < lap_target:
+            laps_left = lap_target - len(coaching_laps)
             if self.external_reference_bins is not None:
                 segments: List[UnderuseSegment] = []
                 self.summary_var.set(
-                    f"IBT reference is loaded. Drive {laps_left} more clean valid lap(s), then coaching will compare you against that baseline."
+                    f"IBT reference is loaded. Drive {laps_left} more {laps_used_label} lap(s), then coaching will compare you against that baseline."
                 )
             else:
-                segments = self._detect_underuse_segments(valid_laps, reference)
+                segments = self._detect_underuse_segments(coaching_laps, reference)
         else:
-            segments = self._detect_underuse_segments(valid_laps, reference)
+            segments = self._detect_underuse_segments(coaching_laps, reference)
 
         usage_pct = (g_total / max(0.5, self.estimated_limit_g)) * 100.0
         self.current_var.set(
@@ -651,16 +735,17 @@ class TractionCircleOverlay:
         )
         self.limit_var.set(f"Estimated limit: {self.estimated_limit_g:.2f}g")
         self.quality_var.set(
-            f"Valid laps used: {len(valid_laps)} | Invalid laps discarded: {self.invalid_laps_count} | "
+            f"Laps used for coaching: {len(coaching_laps)} ({laps_used_label}) | Invalid laps discarded: {self.invalid_laps_count} | "
             f"Outliers removed: {self.outliers_removed_last}"
         )
         self.header_var.set(
             f"Car: {self.current_car} | Track: {self.current_track} | Session: {self.current_session} | "
-            f"Valid laps: {len(valid_laps)}"
+            f"Coaching laps: {len(coaching_laps)}"
         )
         self.mode_var.set(f"Mode: {'compact' if self.compact_mode else 'detailed'}")
-        if len(valid_laps) >= MIN_LAPS_FOR_FEEDBACK or self.external_reference_bins is None:
-            self.summary_var.set(self._format_summary(segments, self.compact_mode))
+        self._refresh_feedback_settings()
+        if len(coaching_laps) >= lap_target or self.external_reference_bins is None:
+            self.summary_var.set(self._format_summary(segments, self.compact_mode, laps_used_label))
 
         self._draw_circle(long_g, lat_g)
         self.root.after(UPDATE_MS, self._update)
