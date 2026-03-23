@@ -317,6 +317,20 @@ class StintTracker:
     LAP_STD_THRESHOLD = 15.0
     PIT_WEAR_RESET_THRESHOLD = 5.0
 
+    @classmethod
+    def learning_criteria_lines(cls) -> List[str]:
+        return [
+            "- End the run by entering pit road so the app can close the stint and save it.",
+            f"- Complete at least {cls.MIN_LAPS} laps in that stint.",
+            (
+                "- Keep the pace reasonably consistent: after trimming the out-lap "
+                f"and in-lap, lap-time spread must stay within {cls.LAP_STD_THRESHOLD:.0f}s."
+            ),
+            "- Reach at least 20 km/h during the stint so the app knows it was a real driving run.",
+            "- The sample is stored per track + config + car, so each combination learns separately.",
+            "- Obvious outlier stints are ignored automatically to protect the model.",
+        ]
+
     def __init__(self):
         self.in_stint = False
         self.prev_on_pit: Optional[bool] = None
@@ -990,6 +1004,15 @@ class SettingsDialog(QtWidgets.QDialog):
 class OverlayUI(QtWidgets.QWidget):
     """Transparent HUD with mini menu (settings/info), updated at 10 Hz."""
 
+    @staticmethod
+    def _insufficient_data_lines(sample_count: int) -> List[str]:
+        return [
+            "Run more stints to teach the tire wear model.",
+            f"Saved valid stints for this track/config/car: {sample_count}.",
+            "A stint is learned only when:",
+            *StintTracker.learning_criteria_lines(),
+        ]
+
     def __init__(self, state: dict, state_lock: threading.Lock):
         super().__init__()
         self.state = state
@@ -1121,6 +1144,11 @@ class OverlayUI(QtWidgets.QWidget):
             f"Samples: {samples}\n"
             f"Model confidence: {model_conf:.1%}\n\n"
         )
+        if samples < 1:
+            msg += "Not enough learning data yet.\n"
+            msg += "Run more stints and make sure they satisfy:\n"
+            msg += "\n".join(StintTracker.learning_criteria_lines())
+            msg += "\n\n"
         self.model_ref.load_rls(str(key))
         msg += self.model_ref.get_coefficients_report(str(key))
         self.info_dialog.set_info(msg)
@@ -1139,6 +1167,8 @@ class OverlayUI(QtWidgets.QWidget):
             track_config = str(self.state.get("track_config", "") or "-")
             car_path = str(self.state.get("car_path", "") or "-")
             estimate_ready = bool(self.state.get("estimate_ready", False))
+            sample_count = int(self.state.get("sample_count", 0))
+            model_confidence = float(self.state.get("model_confidence", 0.0))
 
         lines = []
         if estimate_ready:
@@ -1150,12 +1180,18 @@ class OverlayUI(QtWidgets.QWidget):
                     f"<span style='color:{self._color_for_value(tread.get('rr', 100.0))}'>RR {tread.get('rr', 100.0):5.1f}%</span>",
                 ]
             )
+        else:
+            lines.append("<span style='color:#FFD166'>Not enough data yet.</span>")
+            lines.extend(
+                f"<span style='color:#F5F7FA'>{line}</span>"
+                for line in self._insufficient_data_lines(sample_count)
+            )
 
         lines.extend(
             [
                 f"<span style='color:#B8E0FF'>Track: {track_name} ({track_config})</span>",
                 f"<span style='color:#B8E0FF'>Car: {car_path}</span>",
-                f"<span style='color:#FFD166'>Model confidence: {self.state.get('model_confidence', 0.0):.0%}</span>",
+                f"<span style='color:#FFD166'>Model confidence: {model_confidence:.0%}</span>",
                 f"<span style='color:{'#7CFC00' if connected else '#FF4C4C'}'>SDK: {'ONLINE' if connected else 'OFFLINE'}</span>",
             ]
         )
