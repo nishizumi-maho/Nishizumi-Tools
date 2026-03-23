@@ -33,6 +33,7 @@ class PitStopOverlay:
     PANEL = "#171a21"
     PANEL_ALT = "#1d2230"
     CARD = "#22293a"
+    CARD_BORDER = "#3a4358"
     TEXT = "#f2f2f2"
     MUTED = "#9aa4b2"
     ENTRY_BG = "#101826"
@@ -65,7 +66,7 @@ class PitStopOverlay:
         self.fuel_state_var = tk.StringVar(value="Fuel: -- / -- L")
         self.fuel_time_var = tk.StringVar(value="Fuel time: -- s")
         self.total_time_var = tk.StringVar(value="Total pit time loss: -- s")
-        self.window_var = tk.StringVar(value="Window: --")
+        self.window_var = tk.StringVar(value="Awaiting telemetry")
         self.status_var = tk.StringVar(value="Status: --")
 
         self.profile_data = self._load_profiles()
@@ -192,22 +193,6 @@ class PitStopOverlay:
         )
         minimal_mode_check.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 2))
 
-        self.restore_button = tk.Button(
-            self.root,
-            text="Return to full view",
-            command=self._exit_minimal_mode,
-            font=("Segoe UI", 9, "bold"),
-            bg="#1f2533",
-            fg=self.TEXT,
-            activebackground="#2b3447",
-            activeforeground="white",
-            relief="flat",
-            padx=10,
-            pady=4,
-            takefocus=False,
-            cursor="hand2",
-        )
-
         self.connection_label = tk.Label(
             self.main_frame,
             textvariable=self.connection_var,
@@ -255,6 +240,36 @@ class PitStopOverlay:
         )
         self.status_frame.pack(fill="both", expand=True)
 
+        self.minimal_header = tk.Frame(self.status_frame, bg=self.PANEL_ALT)
+
+        self.minimal_title_label = tk.Label(
+            self.minimal_header,
+            text="Pit rejoin safety",
+            font=("Segoe UI", 10, "bold"),
+            fg=self.MUTED,
+            bg=self.PANEL_ALT,
+        )
+        self.minimal_title_label.pack(side="left", anchor="w")
+
+        self.restore_button = tk.Button(
+            self.minimal_header,
+            text="⤢",
+            command=self._exit_minimal_mode,
+            font=("Segoe UI Symbol", 11, "bold"),
+            bg="#242c3c",
+            fg=self.TEXT,
+            activebackground="#36415a",
+            activeforeground="white",
+            relief="flat",
+            bd=0,
+            padx=8,
+            pady=3,
+            takefocus=False,
+            cursor="hand2",
+            width=2,
+        )
+        self.restore_button.pack(side="right")
+
         self.score_label = tk.Label(
             self.status_frame,
             textvariable=self.window_var,
@@ -263,6 +278,10 @@ class PitStopOverlay:
             fg="white",
             padx=12,
             pady=10,
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=self.CARD_BORDER,
         )
         self.score_label.pack(fill="x")
 
@@ -342,16 +361,21 @@ class PitStopOverlay:
             self.status_details_label.pack_forget()
             self.legend_label.pack_forget()
             self.scrollbar.pack_forget()
-            self.restore_button.place(relx=1.0, x=-10, y=10, anchor="ne")
-            self.status_frame.configure(text="", padx=0, pady=0)
+            self.minimal_header.pack(fill="x", pady=(0, 8), before=self.score_label)
+            self.status_frame.configure(text="", padx=10, pady=10)
             self.status_frame.pack_configure(fill="both", expand=True, pady=0)
-            self.score_label.configure(padx=0, pady=0)
-            self.score_label.pack_configure(fill="both", expand=True, pady=(28, 6))
-            self.root.geometry("320x96")
+            self.score_label.configure(
+                font=("Segoe UI", 24, "bold"),
+                padx=16,
+                pady=12,
+                anchor="center",
+            )
+            self.score_label.pack_configure(fill="both", expand=True, pady=0)
+            self.root.geometry("336x128")
             return
 
         self.title_bar.pack(fill="x", padx=10, pady=(8, 4), before=self.scroll_canvas)
-        self.restore_button.place_forget()
+        self.minimal_header.pack_forget()
         self.scrollbar.pack(side="right", fill="y")
         self.inputs_frame.pack(fill="x")
         self.connection_label.pack(anchor="w", pady=(8, 2))
@@ -360,7 +384,12 @@ class PitStopOverlay:
         self.metrics_frame.pack(fill="x", pady=(6, 8))
         self.status_frame.configure(text=" Pit rejoin safety ", padx=10, pady=10)
         self.status_frame.pack_configure(fill="both", expand=True)
-        self.score_label.configure(padx=12, pady=10)
+        self.score_label.configure(
+            font=("Segoe UI", 28, "bold"),
+            padx=12,
+            pady=10,
+            anchor="w",
+        )
         self.score_label.pack_configure(fill="x", expand=False, pady=0)
         self.status_details_label.pack(anchor="w", pady=(10, 4))
         self.legend_label.pack(anchor="w")
@@ -712,7 +741,7 @@ class PitStopOverlay:
         if not connected:
             self.connection_var.set("Not connected to iRacing. Open sim + click Drive.")
             self.car_var.set("Car: --")
-            self.window_var.set("Window: --")
+            self.window_var.set("Awaiting telemetry")
             self.status_var.set("Status: Waiting for telemetry...")
             self.score_label.config(bg="#4b5563")
             self.root.after(150, self._update)
