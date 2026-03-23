@@ -55,6 +55,60 @@ APP_LABELS = {
     'traction': 'Traction Overlay',
 }
 
+APP_QUICK_STARTS = {
+    'fuel': (
+        "Quick Start Guide\n"
+        "=================\n\n"
+        "1. Launch iRacing, join a session, and click Drive so telemetry is live.\n"
+        "2. Open Fuel Monitor from this launcher.\n"
+        "3. Drag the overlay where you want it and watch the live fuel, laps remaining, and last-lap usage fields.\n"
+        "4. Enter your target fuel per lap if you want the delta colors to show whether you are saving enough fuel.\n"
+        "5. Use the advanced section when you want quick +1 lap / -1 lap fuel targets for strategy adjustments.\n\n"
+        "Tips\n"
+        "----\n"
+        "- If the app says it is waiting for telemetry, make sure iRacing is running and you are already in the car.\n"
+        "- A manual reset is useful after a pit stop, session reset, or any unusual lap that would skew the average."
+    ),
+    'pittime': (
+        "Quick Start Guide\n"
+        "=================\n\n"
+        "1. Launch iRacing, join a session, and open Pit Time Overlay.\n"
+        "2. Enter or confirm your base pit loss for the current track, plus tire-change loss if your series needs it.\n"
+        "3. Let the app observe a real pit stop so it can learn or confirm the fuel fill rate for that car and track.\n"
+        "4. During the race, watch the projected rejoin gaps and traffic-window score before deciding to pit.\n"
+        "5. Use minimal mode if you only want the high-value rejoin window display while racing.\n\n"
+        "Tips\n"
+        "----\n"
+        "- Pit Time remembers profiles per car and track, so verify the values once and it should be faster next time.\n"
+        "- If the projected gaps look wrong, double-check the base pit loss, tire loss, and custom tank settings."
+    ),
+    'tirewear': (
+        "Quick Start Guide\n"
+        "=================\n\n"
+        "1. Launch iRacing, join a session, and start Tire Wear Overlay.\n"
+        "2. Drag the overlay into position so you can see LF, RF, LR, and RR tread percentages while driving.\n"
+        "3. Drive clean laps and complete full stints so the learning model can gather real wear samples.\n"
+        "4. Open the info or settings controls in the overlay when you want more detail, sizing changes, or the built-in guide.\n"
+        "5. Reuse the app on the same car and track combo so model confidence and wear predictions keep improving.\n\n"
+        "Tips\n"
+        "----\n"
+        "- Green tires are healthy, yellow means moderate wear, and red means heavy wear.\n"
+        "- Only use Reset data if you truly want to erase the learned tire wear history for future sessions."
+    ),
+    'traction': (
+        "Quick Start Guide\n"
+        "=================\n\n"
+        "1. Launch iRacing, join a session, and open Traction Overlay.\n"
+        "2. Drive a few clean laps so the app can build a baseline from your own grip usage.\n"
+        "3. Watch the traction circle to see your current long and lateral g usage in real time.\n"
+        "4. Read the coaching summary to find the biggest entry, mid-corner, or exit opportunities first.\n"
+        "5. If you have a strong reference lap in an .ibt file, load it to compare your live laps against that benchmark.\n\n"
+        "Tips\n"
+        "----\n"
+        "- The best coaching appears after enough clean laps, so early sessions may show limited advice at first.\n"
+        "- Compact mode is useful when you only want the highest-impact suggestions during a run."
+    ),
+}
 
 
 class NishizumiLauncher:
@@ -75,6 +129,7 @@ class NishizumiLauncher:
         self.action_vars: Dict[str, tk.StringVar] = {
             key: tk.StringVar(value="Open") for key in APP_SOURCES
         }
+        self.quick_start_windows: Dict[str, tk.Toplevel] = {}
 
         self._build_ui()
         self._poll_processes()
@@ -125,8 +180,26 @@ class NishizumiLauncher:
                 bg="#171d26",
             ).pack(anchor="w", pady=(2, 0))
 
+            actions = tk.Frame(row, bg="#171d26")
+            actions.pack(side="right")
+
             tk.Button(
-                row,
+                actions,
+                text="Guide",
+                command=lambda app_key=key: self.open_quick_start(app_key),
+                font=("Segoe UI", 9),
+                bg="#1d2735",
+                fg="#dce7f5",
+                activebackground="#29384d",
+                activeforeground="#ffffff",
+                relief="flat",
+                padx=10,
+                pady=6,
+                width=6,
+            ).pack(side="left")
+
+            tk.Button(
+                actions,
                 textvariable=self.action_vars[key],
                 command=lambda app_key=key: self.toggle_app(app_key),
                 font=("Segoe UI", 10, "bold"),
@@ -138,7 +211,7 @@ class NishizumiLauncher:
                 padx=14,
                 pady=6,
                 width=8,
-            ).pack(side="right", padx=(12, 0))
+            ).pack(side="left", padx=(8, 0))
 
         footer = tk.Frame(wrapper, bg="#10151c")
         footer.pack(fill="x", pady=(12, 0))
@@ -168,6 +241,78 @@ class NishizumiLauncher:
             padx=12,
             pady=6,
         ).pack(side="left", padx=(8, 0))
+
+    def open_quick_start(self, app_key: str) -> None:
+        existing = self.quick_start_windows.get(app_key)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_force()
+            return
+
+        guide = tk.Toplevel(self.root)
+        guide.title(f"{APP_LABELS[app_key]} - Quick Start")
+        guide.configure(bg="#10151c")
+        guide.geometry("560x420")
+        guide.minsize(480, 340)
+        guide.transient(self.root)
+
+        container = tk.Frame(guide, bg="#10151c", padx=16, pady=16)
+        container.pack(fill="both", expand=True)
+
+        tk.Label(
+            container,
+            text=f"{APP_LABELS[app_key]} Quick Start",
+            font=("Segoe UI", 14, "bold"),
+            fg="#d8f8d8",
+            bg="#10151c",
+        ).pack(anchor="w")
+
+        text_widget = tk.Text(
+            container,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#171d26",
+            fg="#f3f4f6",
+            insertbackground="#f3f4f6",
+            relief="flat",
+            padx=12,
+            pady=12,
+        )
+        text_widget.insert("1.0", APP_QUICK_STARTS[app_key])
+        text_widget.configure(state="disabled")
+
+        scrollbar = tk.Scrollbar(container, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+
+        text_frame = tk.Frame(container, bg="#10151c")
+        text_frame.pack(fill="both", expand=True, pady=(12, 0))
+        text_widget.pack(in_=text_frame, side="left", fill="both", expand=True)
+        scrollbar.pack(in_=text_frame, side="right", fill="y")
+
+        def _cleanup() -> None:
+            self.quick_start_windows.pop(app_key, None)
+            guide.destroy()
+
+        tk.Button(
+            container,
+            text="Close",
+            command=_cleanup,
+            font=("Segoe UI", 9, "bold"),
+            bg="#253247",
+            fg="#f3f4f6",
+            activebackground="#31415d",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=6,
+        ).pack(anchor="e", pady=(12, 0))
+
+
+        guide.protocol("WM_DELETE_WINDOW", _cleanup)
+        self.quick_start_windows[app_key] = guide
+        guide.lift()
+        guide.focus_force()
 
     def _launch_app(self, app_key: str) -> None:
         proc = self.processes.get(app_key)
@@ -230,6 +375,10 @@ class NishizumiLauncher:
         self.root.after(500, self._poll_processes)
 
     def _on_close(self) -> None:
+        for window in list(self.quick_start_windows.values()):
+            if window.winfo_exists():
+                window.destroy()
+        self.quick_start_windows.clear()
         self.close_all()
         self.root.destroy()
 
