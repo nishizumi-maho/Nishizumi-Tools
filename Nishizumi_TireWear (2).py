@@ -890,6 +890,17 @@ class InfoDialog(QtWidgets.QDialog):
 
         self.text = QtWidgets.QPlainTextEdit(self)
         self.text.setReadOnly(True)
+        self.text.setStyleSheet(
+            """
+            QPlainTextEdit {
+                background-color: #FFFFFF;
+                color: #111111;
+                border: 1px solid #CFCFCF;
+                selection-background-color: #B8D9FF;
+                selection-color: #111111;
+            }
+            """
+        )
 
         btn_close = QtWidgets.QPushButton("Close")
         btn_close.clicked.connect(self.close)
@@ -897,9 +908,93 @@ class InfoDialog(QtWidgets.QDialog):
         lay = QtWidgets.QVBoxLayout(self)
         lay.addWidget(self.text)
         lay.addWidget(btn_close, alignment=QtCore.Qt.AlignRight)
+        self.setStyleSheet(
+            """
+            QDialog {
+                background-color: #F5F5F5;
+                color: #111111;
+            }
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #111111;
+                border: 1px solid #BDBDBD;
+                padding: 4px 10px;
+                min-width: 72px;
+            }
+            QPushButton:hover {
+                background-color: #EAEAEA;
+            }
+            """
+        )
 
     def set_info(self, message: str):
         self.text.setPlainText(message)
+
+
+class QuickStartDialog(QtWidgets.QDialog):
+    """Short usage guide accessible from settings."""
+
+    GUIDE_TEXT = (
+        "Quick Start Guide\n"
+        "=================\n\n"
+        "1. Launch iRacing and join a session.\n"
+        "2. Start this app to show the tire wear overlay.\n"
+        "3. Drag the overlay to the position you want on screen.\n"
+        "4. Open Settings (⚙) to change size, font, opacity, or keep it always on top.\n"
+        "5. Drive clean laps and complete stints so the model can learn your tire wear.\n"
+        "6. Click the Information button (ℹ) to review connection status, temperatures, sample count, and model confidence.\n"
+        "7. Use Reset data only if you want to erase the learned tire wear history and start over.\n\n"
+        "Tips\n"
+        "----\n"
+        "- Green tires are healthy, yellow means moderate wear, and red means heavy wear.\n"
+        "- Model confidence improves after the app records more completed stints for the same car and track.\n"
+        "- If the SDK shows OFFLINE, make sure iRacing is running and telemetry is available."
+    )
+
+    def __init__(self, parent: QtWidgets.QWidget):
+        super().__init__(parent)
+        self.setWindowTitle("Tire Overlay - Quick Start")
+        self.resize(560, 360)
+
+        self.text = QtWidgets.QPlainTextEdit(self)
+        self.text.setReadOnly(True)
+        self.text.setPlainText(self.GUIDE_TEXT)
+        self.text.setStyleSheet(
+            """
+            QPlainTextEdit {
+                background-color: #FFFFFF;
+                color: #111111;
+                border: 1px solid #CFCFCF;
+                selection-background-color: #B8D9FF;
+                selection-color: #111111;
+            }
+            """
+        )
+
+        btn_close = QtWidgets.QPushButton("Close")
+        btn_close.clicked.connect(self.close)
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(self.text)
+        lay.addWidget(btn_close, alignment=QtCore.Qt.AlignRight)
+        self.setStyleSheet(
+            """
+            QDialog {
+                background-color: #F5F5F5;
+                color: #111111;
+            }
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #111111;
+                border: 1px solid #BDBDBD;
+                padding: 4px 10px;
+                min-width: 72px;
+            }
+            QPushButton:hover {
+                background-color: #EAEAEA;
+            }
+            """
+        )
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -928,6 +1023,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.h_spin.setRange(120, 600)
         self.h_spin.setValue(parent.settings["height"])
 
+        btn_quick_start = QtWidgets.QPushButton("Quick start guide")
+        btn_quick_start.clicked.connect(parent.open_quick_start)
+
         btn_reset_data = QtWidgets.QPushButton("Reset data (clear memory)")
         btn_reset_data.clicked.connect(parent.reset_all_data)
 
@@ -950,6 +1048,7 @@ class SettingsDialog(QtWidgets.QDialog):
         form.addRow("Overlay size", size_row)
 
         bottom = QtWidgets.QHBoxLayout()
+        bottom.addWidget(btn_quick_start)
         bottom.addWidget(btn_reset_data)
         bottom.addStretch(1)
         bottom.addWidget(btn_apply)
@@ -1027,6 +1126,7 @@ class OverlayUI(QtWidgets.QWidget):
         self.setLayout(layout)
 
         self.info_dialog = InfoDialog(self)
+        self.quick_start_dialog = QuickStartDialog(self)
         self.settings_dialog = SettingsDialog(self)
 
         self.apply_settings()
@@ -1130,6 +1230,10 @@ class OverlayUI(QtWidgets.QWidget):
     def open_settings(self):
         self.settings_dialog.show()
         self.settings_dialog.raise_()
+
+    def open_quick_start(self):
+        self.quick_start_dialog.show()
+        self.quick_start_dialog.raise_()
 
     def refresh(self):
         with self.state_lock:
