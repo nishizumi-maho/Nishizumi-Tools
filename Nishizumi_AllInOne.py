@@ -276,11 +276,18 @@ class NishizumiLauncher:
             fg="#f3f4f6",
             insertbackground="#f3f4f6",
             relief="flat",
+            highlightthickness=1,
+            highlightbackground="#283241",
+            highlightcolor="#31415d",
+            borderwidth=0,
             padx=12,
             pady=12,
         )
         text_widget.insert("1.0", APP_QUICK_STARTS[app_key])
-        text_widget.configure(state="disabled")
+        text_widget.configure(cursor="arrow", insertwidth=0)
+        text_widget.bind("<Key>", lambda _event: "break")
+        text_widget.bind("<<Cut>>", lambda _event: "break")
+        text_widget.bind("<<Paste>>", lambda _event: "break")
 
         scrollbar = tk.Scrollbar(container, command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
