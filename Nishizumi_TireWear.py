@@ -916,6 +916,28 @@ class InfoDialog(QtWidgets.QDialog):
         self.text.setPlainText(message)
 
 
+class QuickStartDialog(QtWidgets.QDialog):
+    """Compact help dialog for first-time setup and learning criteria."""
+
+    def __init__(self, parent: QtWidgets.QWidget):
+        super().__init__(parent)
+        self.setWindowTitle("Tire Overlay - Quick Start")
+        self.resize(460, 260)
+
+        self.text = QtWidgets.QPlainTextEdit(self)
+        self.text.setReadOnly(True)
+
+        btn_close = QtWidgets.QPushButton("Close")
+        btn_close.clicked.connect(self.close)
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.addWidget(self.text)
+        lay.addWidget(btn_close, alignment=QtCore.Qt.AlignRight)
+
+    def set_lines(self, lines: List[str]):
+        self.text.setPlainText("\n".join(lines))
+
+
 class SettingsDialog(QtWidgets.QDialog):
     """Simple settings menu for overlay behavior and appearance."""
 
@@ -942,6 +964,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.h_spin.setRange(120, 600)
         self.h_spin.setValue(parent.settings["height"])
 
+        btn_quick_start = QtWidgets.QPushButton("Quick start")
+        btn_quick_start.clicked.connect(parent.open_quick_start)
+
         btn_reset_data = QtWidgets.QPushButton("Reset data (clear memory)")
         btn_reset_data.clicked.connect(parent.reset_all_data)
 
@@ -964,6 +989,7 @@ class SettingsDialog(QtWidgets.QDialog):
         form.addRow("Overlay size", size_row)
 
         bottom = QtWidgets.QHBoxLayout()
+        bottom.addWidget(btn_quick_start)
         bottom.addWidget(btn_reset_data)
         bottom.addStretch(1)
         bottom.addWidget(btn_apply)
@@ -1005,7 +1031,7 @@ class OverlayUI(QtWidgets.QWidget):
     """Transparent HUD with mini menu (settings/info), updated at 10 Hz."""
 
     @staticmethod
-    def _insufficient_data_lines(sample_count: int) -> List[str]:
+    def _quick_start_lines(sample_count: int) -> List[str]:
         return [
             "Run more stints to teach the tire wear model.",
             f"Saved valid stints for this track/config/car: {sample_count}.",
@@ -1050,6 +1076,7 @@ class OverlayUI(QtWidgets.QWidget):
         self.setLayout(layout)
 
         self.info_dialog = InfoDialog(self)
+        self.quick_start_dialog = QuickStartDialog(self)
         self.settings_dialog = SettingsDialog(self)
 
         self.apply_settings()
@@ -1159,6 +1186,13 @@ class OverlayUI(QtWidgets.QWidget):
         self.settings_dialog.show()
         self.settings_dialog.raise_()
 
+    def open_quick_start(self):
+        with self.state_lock:
+            sample_count = int(self.state.get("sample_count", 0))
+        self.quick_start_dialog.set_lines(self._quick_start_lines(sample_count))
+        self.quick_start_dialog.show()
+        self.quick_start_dialog.raise_()
+
     def refresh(self):
         with self.state_lock:
             tread = dict(self.state.get("tread", {t: 100.0 for t in TIRE_KEYS}))
@@ -1182,9 +1216,8 @@ class OverlayUI(QtWidgets.QWidget):
             )
         else:
             lines.append("<span style='color:#FFD166'>Not enough data yet.</span>")
-            lines.extend(
-                f"<span style='color:#F5F7FA'>{line}</span>"
-                for line in self._insufficient_data_lines(sample_count)
+            lines.append(
+                f"<span style='color:#F5F7FA'>Saved valid stints: {sample_count} — open Settings → Quick start for setup help.</span>"
             )
 
         lines.extend(
