@@ -252,33 +252,33 @@ class NishizumiLauncher:
 
         guide = tk.Toplevel(self.root)
         guide.title(f"{APP_LABELS[app_key]} - Quick Start")
-        guide.configure(bg="#10151c")
+        guide.configure(bg="#f4efe3")
         guide.geometry("560x420")
         guide.minsize(480, 340)
         guide.transient(self.root)
 
-        container = tk.Frame(guide, bg="#10151c", padx=16, pady=16)
+        container = tk.Frame(guide, bg="#f4efe3", padx=16, pady=16)
         container.pack(fill="both", expand=True)
 
         tk.Label(
             container,
             text=f"{APP_LABELS[app_key]} Quick Start",
             font=("Segoe UI", 14, "bold"),
-            fg="#d8f8d8",
-            bg="#10151c",
+            fg="#1f2933",
+            bg="#f4efe3",
         ).pack(anchor="w")
 
         text_widget = tk.Text(
             container,
             wrap="word",
             font=("Consolas", 10),
-            bg="#171d26",
-            fg="#f3f4f6",
-            insertbackground="#f3f4f6",
+            bg="#fffdf8",
+            fg="#10212b",
+            insertbackground="#10212b",
             relief="flat",
             highlightthickness=1,
-            highlightbackground="#283241",
-            highlightcolor="#31415d",
+            highlightbackground="#c9b48a",
+            highlightcolor="#b88a44",
             borderwidth=0,
             padx=12,
             pady=12,
@@ -292,7 +292,7 @@ class NishizumiLauncher:
         scrollbar = tk.Scrollbar(container, command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
 
-        text_frame = tk.Frame(container, bg="#10151c")
+        text_frame = tk.Frame(container, bg="#f4efe3")
         text_frame.pack(fill="both", expand=True, pady=(12, 0))
         text_widget.pack(in_=text_frame, side="left", fill="both", expand=True)
         scrollbar.pack(in_=text_frame, side="right", fill="y")
