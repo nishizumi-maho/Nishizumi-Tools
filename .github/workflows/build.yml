@@ -1,4 +1,4 @@
-name: Build EXE
+name: CI
 
 on:
   push:
@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: windows-latest
+  validate:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -23,40 +23,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller irsdk
+          python -m pip install -r requirements.txt
 
-      - name: Rename scripts to valid module names
-        shell: pwsh
+      - name: Validate Python syntax
         run: |
-          Copy-Item 'pit_stop_overlay (4).py'         'pit_stop_overlay.py'
-          Copy-Item 'traction_circle_overlay (2).py'  'traction_circle_overlay.py'
-
-      - name: Build pit_stop_overlay.exe
-        run: >
-          pyinstaller
-          --onefile
-          --noconsole
-          --name pit_stop_overlay
-          pit_stop_overlay.py
-
-      - name: Build traction_circle_overlay.exe
-        run: >
-          pyinstaller
-          --onefile
-          --noconsole
-          --name traction_circle_overlay
-          traction_circle_overlay.py
-
-      - name: Upload pit_stop_overlay.exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: pit_stop_overlay
-          path: dist/pit_stop_overlay.exe
-          retention-days: 30
-
-      - name: Upload traction_circle_overlay.exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: traction_circle_overlay
-          path: dist/traction_circle_overlay.exe
-          retention-days: 30
+          python -m py_compile apps/Nishizumi_FuelMonitor.py
+          python -m py_compile apps/Nishizumi_Pittime.py
+          python -m py_compile apps/Nishizumi_TireWear.py
+          python -m py_compile apps/Nishizumi_Traction.py

@@ -1,8 +1,8 @@
-# Nishizumi Fuel Documentation
+# FuelMonitor Documentation
 
 ## Overview
 
-Nishizumi Fuel is a Tkinter-based overlay that connects to iRacing via the `irsdk` Python
+Nishizumi FuelMonitor is a Tkinter-based overlay that connects to iRacing via the `irsdk` Python
 bindings. It tracks fuel usage across a stint, filters anomalous laps, and provides both
 high-level and detailed stint planning insights.
 
