@@ -1,6 +1,6 @@
 # Nishizumi Tools
 
-➡️ **Latest Release:** [Get the newest release package](https://github.com/<YOUR-USER-OR-ORG>/Nishizumi-Tools/releases/latest)
+➡️ **Latest Release:** [Get the newest release package](https://github.com/nishizumi-maho/Nishizumi-Tools/releases)
 
 Nishizumi Tools is a collection of standalone iRacing helper overlays written in Python. Each app focuses on one race-day task:
 
