@@ -55,6 +55,41 @@ Files currently used:
 
 ---
 
+
+## Launcher menu (for all apps)
+
+**File:** `Nishizumi_Launcher.py`
+
+```bash
+python Nishizumi_Launcher.py
+```
+
+What it does:
+
+- scans the `apps` folder next to the launcher
+- lists every runnable app file (`.py`, `.pyw`, `.exe`, `.bat`, `.cmd`)
+- opens a selected app from the menu
+- closes a selected app (or all launched apps) from the menu
+
+### Build with auto-py-to-exe
+
+Recommended structure after building:
+
+- `Nishizumi_Launcher.exe`
+- `apps/` (same folder as the exe)
+  - your app files (Python scripts or exes)
+
+In auto-py-to-exe:
+
+1. Choose `Nishizumi_Launcher.py` as the script.
+2. Build **One File** or **One Directory** (both work).
+3. Keep/put an `apps` folder next to the generated launcher exe.
+4. Add or replace app files inside `apps`; use **Refresh** in the launcher.
+
+> Note: If an app in `apps` is a `.py` file and you run a compiled launcher, Windows file association for `.py` must be available. For fully standalone distribution, compile each app to `.exe` and place those exes in `apps`.
+
+---
+
 ## Included apps
 
 ## 1) Nishizumi FuelMonitor
