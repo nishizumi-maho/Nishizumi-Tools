@@ -612,6 +612,51 @@ class ProfileManager:
             "series_id": sorted(series_ids),
         }
 
+    def delete_profile(self, combo_key: str, renderer_file: str | None = None, grouping_mode: str | None = None) -> bool:
+        renderer_file = renderer_file or self.get_selected_renderer()
+        grouping_mode = grouping_mode or self.get_selected_grouping()
+
+        with self.lock:
+            combos = self.grouping_section(renderer_file, grouping_mode).setdefault("combos", {})
+            entry = combos.pop(combo_key, None)
+            if entry is None:
+                return False
+
+            ini_path = Path(str(entry.get("profile_ini") or ""))
+            meta_path = Path(str(entry.get("profile_meta") or ""))
+            for path in (ini_path, meta_path):
+                if path and path.exists():
+                    try:
+                        path.unlink()
+                    except Exception:
+                        pass
+
+            self.save_manifest()
+            return True
+
+    def delete_all_profiles(self) -> int:
+        removed = 0
+        with self.lock:
+            renderers = self.manifest.setdefault("renderers", {})
+            for renderer_section in renderers.values():
+                groupings = renderer_section.setdefault("groupings", {})
+                for grouping_section in groupings.values():
+                    combos = grouping_section.setdefault("combos", {})
+                    for entry in list(combos.values()):
+                        ini_path = Path(str(entry.get("profile_ini") or ""))
+                        meta_path = Path(str(entry.get("profile_meta") or ""))
+                        for path in (ini_path, meta_path):
+                            if path and path.exists():
+                                try:
+                                    path.unlink()
+                                except Exception:
+                                    pass
+                    removed += len(combos)
+                    combos.clear()
+
+            self.save_manifest()
+        return removed
+
 
 # ============================================================
 # IRACING RUNTIME
@@ -1120,6 +1165,10 @@ class App(QMainWindow):
         row0.addWidget(self.grouping_combo)
 
         row0.addSpacing(10)
+        change_folder_btn = QPushButton("Change iRacing folder")
+        change_folder_btn.clicked.connect(self.change_iracing_folder)
+        row0.addWidget(change_folder_btn)
+
         self.renderer_label = QLabel()
         self.grouping_label = QLabel()
         row0.addWidget(self.renderer_label)
@@ -1184,6 +1233,8 @@ class App(QMainWindow):
             ("Create/refresh global backup", self.create_global_backup),
             ("Restore global backup to selected renderer INI", self.restore_global_backup),
             ("Open current profiles folder", self.open_profiles_folder),
+            ("Delete selected profile", self.delete_selected_profile),
+            ("Delete ALL profiles", self.delete_all_profiles),
         ]
         for idx, (label, cb) in enumerate(buttons):
             r, c = divmod(idx, 3)
@@ -1495,6 +1546,95 @@ class App(QMainWindow):
             self.set_status("Profiles folder opened")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def change_iracing_folder(self) -> None:
+        browse_start = self.iracing_docs if self.iracing_docs.exists() else DEFAULT_IRACING_DOCS
+        chosen = self._browse_iracing_docs(browse_start)
+        if chosen is None:
+            self.set_status("Folder change canceled")
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Confirm folder change",
+            "Switch iRacing folder to:\n"
+            f"{chosen}\n\n"
+            "This will reload profiles/settings from the new location.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.set_status("Folder change canceled")
+            return
+
+        self.iracing_docs = chosen
+        self._save_bootstrap_path(chosen)
+        self.manager = ProfileManager(chosen)
+
+        self.renderer_combo.blockSignals(True)
+        self.grouping_combo.blockSignals(True)
+        self.renderer_combo.setCurrentText(self.renderer_to_label(self.manager.get_selected_renderer()))
+        self.grouping_combo.setCurrentText(self.grouping_to_label(self.manager.get_selected_grouping()))
+        self.renderer_combo.blockSignals(False)
+        self.grouping_combo.blockSignals(False)
+
+        self.selected_combo_key = None
+        self._run_first_time_setup_if_needed()
+        self.refresh_all()
+        self.set_status(f"iRacing folder changed to {chosen}")
+
+    def delete_selected_profile(self) -> None:
+        combo = self.combo_from_form()
+        if not combo.is_complete():
+            QMessageBox.information(self, "Info", "Select a profile first.")
+            return
+
+        combo_key = combo.combo_key(self.current_grouping_mode())
+        entry = self.manager.get_entry(combo_key, self.current_renderer_file(), self.current_grouping_mode())
+        if not entry:
+            QMessageBox.information(self, "Info", "Profile not found for the current selection.")
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Delete selected profile",
+            "Delete this profile?\n\n"
+            f"{combo_key}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.set_status("Delete selected profile canceled")
+            return
+
+        deleted = self.manager.delete_profile(combo_key, self.current_renderer_file(), self.current_grouping_mode())
+        if not deleted:
+            QMessageBox.information(self, "Info", "The selected profile no longer exists.")
+            return
+
+        self.selected_combo_key = None
+        self.clear_fields()
+        self.refresh_all()
+        self.set_status(f"Deleted profile: {combo_key}")
+
+    def delete_all_profiles(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Delete ALL profiles",
+            "Delete ALL saved profiles across all renderers/groupings?\n"
+            "This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.set_status("Delete all profiles canceled")
+            return
+
+        removed = self.manager.delete_all_profiles()
+        self.selected_combo_key = None
+        self.clear_fields()
+        self.refresh_all()
+        self.set_status(f"Deleted {removed} profile(s)")
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         try:
