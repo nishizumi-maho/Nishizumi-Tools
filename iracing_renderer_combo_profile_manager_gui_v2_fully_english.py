@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -43,10 +44,8 @@ from PySide6.QtWidgets import (
 # ============================================================
 # CONFIG
 # ============================================================
-IRACING_DOCS = Path(r"C:\Users\user\Documents\iRacing")
-PROFILE_ROOT = IRACING_DOCS / "combo_profiles"
-APP_SETTINGS_PATH = PROFILE_ROOT / "app_settings.json"
-MANIFEST_PATH = PROFILE_ROOT / "index.json"
+DEFAULT_IRACING_DOCS = Path.home() / "Documents" / "iRacing"
+BOOTSTRAP_SETTINGS_PATH = Path.home() / ".iracing_renderer_combo_profile_manager_bootstrap.json"
 
 RENDERER_OPTIONS = {
     "Monitor": "rendererDX11Monitor.ini",
@@ -237,7 +236,11 @@ class ComboInfo:
 # PROFILE MANAGER
 # ============================================================
 class ProfileManager:
-    def __init__(self) -> None:
+    def __init__(self, iracing_docs: Path) -> None:
+        self.iracing_docs = iracing_docs
+        self.profile_root = self.iracing_docs / "combo_profiles"
+        self.app_settings_path = self.profile_root / "app_settings.json"
+        self.manifest_path = self.profile_root / "index.json"
         self.lock = threading.RLock()
         self.ensure_dirs()
         self.settings = self.load_settings()
@@ -248,12 +251,12 @@ class ProfileManager:
         self.ensure_global_backup_if_missing()
 
     def ensure_dirs(self) -> None:
-        PROFILE_ROOT.mkdir(parents=True, exist_ok=True)
+        self.profile_root.mkdir(parents=True, exist_ok=True)
 
     def load_settings(self) -> dict[str, Any]:
-        if APP_SETTINGS_PATH.exists():
+        if self.app_settings_path.exists():
             try:
-                data = json.loads(APP_SETTINGS_PATH.read_text(encoding="utf-8"))
+                data = json.loads(self.app_settings_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     return data
             except Exception:
@@ -261,7 +264,7 @@ class ProfileManager:
         return {}
 
     def save_settings(self) -> None:
-        APP_SETTINGS_PATH.write_text(
+        self.app_settings_path.write_text(
             json.dumps(self.settings, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
@@ -272,9 +275,9 @@ class ProfileManager:
         return not (renderer_ok and grouping_ok)
 
     def load_manifest(self) -> dict[str, Any]:
-        if MANIFEST_PATH.exists():
+        if self.manifest_path.exists():
             try:
-                data = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+                data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and isinstance(data.get("renderers"), dict):
                     return data
             except Exception:
@@ -287,7 +290,7 @@ class ProfileManager:
     def save_manifest(self) -> None:
         with self.lock:
             self.manifest["updated_at"] = now_str()
-            MANIFEST_PATH.write_text(
+            self.manifest_path.write_text(
                 json.dumps(self.manifest, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
@@ -325,7 +328,7 @@ class ProfileManager:
 
     def get_active_ini(self, renderer_file: str | None = None) -> Path:
         renderer_file = renderer_file or self.get_selected_renderer()
-        return IRACING_DOCS / renderer_file
+        return self.iracing_docs / renderer_file
 
     def renderer_stem(self, renderer_file: str | None = None) -> str:
         renderer_file = renderer_file or self.get_selected_renderer()
@@ -333,7 +336,7 @@ class ProfileManager:
 
     def get_renderer_dir(self, renderer_file: str | None = None) -> Path:
         renderer_file = renderer_file or self.get_selected_renderer()
-        path = PROFILE_ROOT / self.renderer_stem(renderer_file)
+        path = self.profile_root / self.renderer_stem(renderer_file)
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -346,7 +349,7 @@ class ProfileManager:
 
     def get_global_backup_path(self, renderer_file: str | None = None) -> Path:
         renderer_file = renderer_file or self.get_selected_renderer()
-        return PROFILE_ROOT / f"{self.renderer_stem(renderer_file)}.global_backup.ini"
+        return self.profile_root / f"{self.renderer_stem(renderer_file)}.global_backup.ini"
 
     def ensure_renderer_section(self, renderer_file: str) -> None:
         with self.lock:
@@ -928,7 +931,8 @@ class App(QMainWindow):
         self.resize(1280, 830)
         self.setMinimumSize(1160, 720)
 
-        self.manager = ProfileManager()
+        self.iracing_docs = self._resolve_iracing_docs_path()
+        self.manager = ProfileManager(self.iracing_docs)
         self.log_queue: list[str] = []
         self.log_lock = threading.Lock()
         self.refresh_requested = threading.Event()
@@ -951,6 +955,74 @@ class App(QMainWindow):
         self.log_timer.setInterval(200)
         self.log_timer.timeout.connect(self._drain_log_queue)
         self.log_timer.start()
+
+    def _load_bootstrap_path(self) -> Path | None:
+        if not BOOTSTRAP_SETTINGS_PATH.exists():
+            return None
+        try:
+            data = json.loads(BOOTSTRAP_SETTINGS_PATH.read_text(encoding="utf-8"))
+            saved = str(data.get("iracing_docs") or "").strip() if isinstance(data, dict) else ""
+            return Path(saved) if saved else None
+        except Exception:
+            return None
+
+    def _save_bootstrap_path(self, iracing_docs: Path) -> None:
+        payload = {
+            "iracing_docs": str(iracing_docs),
+            "saved_at": now_str(),
+        }
+        BOOTSTRAP_SETTINGS_PATH.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def _browse_iracing_docs(self, start_path: Path) -> Path | None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Select your Documents/iRacing folder",
+            str(start_path),
+        )
+        if not selected:
+            return None
+        return Path(selected)
+
+    def _resolve_iracing_docs_path(self) -> Path:
+        saved = self._load_bootstrap_path()
+        if saved:
+            return saved
+
+        default_path = DEFAULT_IRACING_DOCS
+        found_renderer_files = [
+            renderer_file for renderer_file in RENDERER_OPTIONS.values()
+            if (default_path / renderer_file).exists()
+        ]
+        found_text = ", ".join(found_renderer_files) if found_renderer_files else "none of the known renderer INI files"
+
+        answer = QMessageBox.question(
+            self,
+            "Confirm iRacing folder",
+            "Detected iRacing folder:\n"
+            f"{default_path}\n\n"
+            f"Renderer files found: {found_text}\n\n"
+            "Use this folder?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+
+        if answer == QMessageBox.StandardButton.Yes:
+            chosen = default_path
+        else:
+            browse_start = default_path.parent if default_path.parent.exists() else Path.home()
+            chosen = self._browse_iracing_docs(browse_start) or default_path
+            if chosen == default_path:
+                QMessageBox.information(
+                    self,
+                    "Using default folder",
+                    f"No folder selected. The app will use:\n{default_path}",
+                )
+
+        self._save_bootstrap_path(chosen)
+        return chosen
 
     def enqueue_log(self, text: str) -> None:
         with self.log_lock:
@@ -1159,7 +1231,7 @@ class App(QMainWindow):
         self.paths_label.setText(
             f"Active INI: {active_ini}\n"
             f"Profiles dir: {profiles_dir}\n"
-            f"Manifest: {MANIFEST_PATH}\n"
+            f"Manifest: {self.manager.manifest_path}\n"
             f"Global backup: {backup}"
         )
 
