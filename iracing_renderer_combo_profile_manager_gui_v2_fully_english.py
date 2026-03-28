@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import threading
 import time
-import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import messagebox, ttk
-from tkinter.scrolledtext import ScrolledText
 from typing import Any
 
 import irsdk
@@ -18,6 +16,28 @@ import psutil
 import win32con
 import win32gui
 import win32process
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 # ============================================================
@@ -849,96 +869,60 @@ class MonitorService:
 
 
 # ============================================================
-# FIRST RUN DIALOG
+# FIRST RUN DIALOG (PYSIDE6)
 # ============================================================
-class FirstRunDialog(tk.Toplevel):
-    def __init__(self, parent: tk.Tk, default_renderer_label: str, default_grouping_label: str) -> None:
+class FirstRunDialog(QDialog):
+    def __init__(self, parent: QWidget | None, default_renderer_label: str, default_grouping_label: str) -> None:
         super().__init__(parent)
-        self.title("First-time setup")
-        self.resizable(False, False)
-        self.transient(parent)
-        self.grab_set()
+        self.setWindowTitle("First-time setup")
+        self.setModal(True)
 
-        self.result: tuple[str, str] | None = None
-        self.renderer_var = tk.StringVar(value=default_renderer_label)
-        self.grouping_var = tk.StringVar(value=default_grouping_label)
+        layout = QVBoxLayout(self)
 
-        frame = ttk.Frame(self, padding=14)
-        frame.pack(fill="both", expand=True)
+        intro = QLabel(
+            "Choose the default renderer and profile grouping mode.\n"
+            "You can change this later in the app."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
 
-        ttk.Label(
-            frame,
-            text="Choose the default renderer and profile grouping mode.\nYou can change this later in the app.",
-            justify="left",
-        ).pack(anchor="w", pady=(0, 12))
+        form = QFormLayout()
+        self.renderer_combo = QComboBox()
+        self.renderer_combo.addItems(list(RENDERER_OPTIONS.keys()))
+        self.renderer_combo.setCurrentText(default_renderer_label)
 
-        row1 = ttk.Frame(frame)
-        row1.pack(fill="x", pady=4)
-        ttk.Label(row1, text="Default renderer", width=22).pack(side="left")
-        ttk.Combobox(
-            row1,
-            textvariable=self.renderer_var,
-            values=list(RENDERER_OPTIONS.keys()),
-            state="readonly",
-            width=20,
-        ).pack(side="left")
+        self.grouping_combo = QComboBox()
+        self.grouping_combo.addItems(list(GROUPING_OPTIONS.keys()))
+        self.grouping_combo.setCurrentText(default_grouping_label)
 
-        row2 = ttk.Frame(frame)
-        row2.pack(fill="x", pady=4)
-        ttk.Label(row2, text="Default grouping", width=22).pack(side="left")
-        ttk.Combobox(
-            row2,
-            textvariable=self.grouping_var,
-            values=list(GROUPING_OPTIONS.keys()),
-            state="readonly",
-            width=20,
-        ).pack(side="left")
+        form.addRow("Default renderer", self.renderer_combo)
+        form.addRow("Default grouping", self.grouping_combo)
+        layout.addLayout(form)
 
-        btns = ttk.Frame(frame)
-        btns.pack(fill="x", pady=(14, 0))
-        ttk.Button(btns, text="Save", command=self.on_ok).pack(side="right")
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        save_btn = QPushButton("Save")
+        save_btn.clicked.connect(self.accept)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
 
-        self.protocol("WM_DELETE_WINDOW", self.on_ok)
-        self.bind("<Return>", lambda _e: self.on_ok())
-        self.update_idletasks()
-        self.geometry(f"+{parent.winfo_rootx() + 80}+{parent.winfo_rooty() + 80}")
-
-    def on_ok(self) -> None:
-        self.result = (self.renderer_var.get(), self.grouping_var.get())
-        self.destroy()
+    def result_values(self) -> tuple[str, str]:
+        return self.renderer_combo.currentText(), self.grouping_combo.currentText()
 
 
 # ============================================================
-# TKINTER GUI
+# PYSIDE6 GUI
 # ============================================================
-class App(tk.Tk):
+class App(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-
-        self.title("iRacing Renderer Combo Profile Manager")
-        self.geometry("1280x830")
-        self.minsize(1160, 720)
+        self.setWindowTitle("iRacing Renderer Combo Profile Manager")
+        self.resize(1280, 830)
+        self.setMinimumSize(1160, 720)
 
         self.manager = ProfileManager()
         self.log_queue: list[str] = []
         self.log_lock = threading.Lock()
-
-        self.renderer_ui_var = tk.StringVar(value=self.renderer_to_label(self.manager.get_selected_renderer()))
-        self.grouping_ui_var = tk.StringVar(value=self.grouping_to_label(self.manager.get_selected_grouping()))
-        self.renderer_label_var = tk.StringVar()
-        self.grouping_label_var = tk.StringVar()
-
-        self.track_internal_var = tk.StringVar()
-        self.track_config_var = tk.StringVar()
-        self.track_display_var = tk.StringVar()
-        self.track_display_short_var = tk.StringVar()
-        self.car_path_var = tk.StringVar()
-        self.car_screen_var = tk.StringVar()
-        self.car_short_var = tk.StringVar()
-        self.series_id_var = tk.StringVar()
-        self.enabled_var = tk.BooleanVar(value=True)
-        self.autosave_var = tk.BooleanVar(value=True)
-        self.status_var = tk.StringVar(value="Ready")
 
         self.selected_combo_key: str | None = None
 
@@ -949,8 +933,11 @@ class App(tk.Tk):
         self.monitor.start()
 
         self.refresh_all()
-        self.after(200, self._drain_log_queue)
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.log_timer = QTimer(self)
+        self.log_timer.setInterval(200)
+        self.log_timer.timeout.connect(self._drain_log_queue)
+        self.log_timer.start()
 
     def enqueue_log(self, text: str) -> None:
         with self.log_lock:
@@ -961,13 +948,12 @@ class App(tk.Tk):
             items = self.log_queue[:]
             self.log_queue.clear()
 
-        for item in items:
-            self.log_text.configure(state="normal")
-            self.log_text.insert("end", item + "\n")
-            self.log_text.see("end")
-            self.log_text.configure(state="disabled")
+        if not items:
+            return
 
-        self.after(200, self._drain_log_queue)
+        self.log_text.moveCursor(QTextCursor.MoveOperation.End)
+        for item in items:
+            self.log_text.append(item)
 
     def renderer_to_label(self, renderer_file: str) -> str:
         for label, file_name in RENDERER_OPTIONS.items():
@@ -988,32 +974,29 @@ class App(tk.Tk):
         return GROUPING_OPTIONS.get(label, self.manager.get_selected_grouping())
 
     def current_renderer_file(self) -> str:
-        return self.label_to_renderer(self.renderer_ui_var.get())
+        return self.label_to_renderer(self.renderer_combo.currentText())
 
     def current_grouping_mode(self) -> str:
-        return self.label_to_grouping(self.grouping_ui_var.get())
+        return self.label_to_grouping(self.grouping_combo.currentText())
 
     def _run_first_time_setup_if_needed(self) -> None:
         if not self.manager.needs_initial_setup():
             return
 
-        self.update_idletasks()
-        dialog = FirstRunDialog(
-            self,
-            default_renderer_label="OpenXR",
-            default_grouping_label="Car + track",
-        )
-        self.wait_window(dialog)
+        dialog = FirstRunDialog(self, "OpenXR", "Car + track")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            renderer_label, grouping_label = dialog.result_values()
+        else:
+            renderer_label, grouping_label = "OpenXR", "Car + track"
 
-        renderer_label, grouping_label = dialog.result or ("OpenXR", "Car + track")
         renderer_file = self.label_to_renderer(renderer_label)
         grouping_mode = self.label_to_grouping(grouping_label)
 
         self.manager.set_selected_renderer(renderer_file)
         self.manager.set_selected_grouping(grouping_mode)
 
-        self.renderer_ui_var.set(renderer_label)
-        self.grouping_ui_var.set(grouping_label)
+        self.renderer_combo.setCurrentText(renderer_label)
+        self.grouping_combo.setCurrentText(grouping_label)
 
         self.enqueue_log(
             f"[{now_str()}] First-time setup saved | "
@@ -1021,128 +1004,126 @@ class App(tk.Tk):
         )
 
     def _build_ui(self) -> None:
-        root = ttk.Frame(self, padding=10)
-        root.pack(fill="both", expand=True)
+        central = QWidget(self)
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
 
-        top = ttk.LabelFrame(root, text="App configuration", padding=10)
-        top.pack(fill="x")
+        top_box = QGroupBox("App configuration")
+        top_layout = QVBoxLayout(top_box)
+        row0 = QHBoxLayout()
 
-        row0 = ttk.Frame(top)
-        row0.pack(fill="x")
+        row0.addWidget(QLabel("Default renderer"))
+        self.renderer_combo = QComboBox()
+        self.renderer_combo.addItems(list(RENDERER_OPTIONS.keys()))
+        self.renderer_combo.setCurrentText(self.renderer_to_label(self.manager.get_selected_renderer()))
+        self.renderer_combo.currentTextChanged.connect(self.on_renderer_changed)
+        row0.addWidget(self.renderer_combo)
 
-        ttk.Label(row0, text="Default renderer").pack(side="left")
-        self.renderer_combo = ttk.Combobox(
-            row0,
-            textvariable=self.renderer_ui_var,
-            values=list(RENDERER_OPTIONS.keys()),
-            state="readonly",
-            width=16,
-        )
-        self.renderer_combo.pack(side="left", padx=(10, 14))
-        self.renderer_combo.bind("<<ComboboxSelected>>", self.on_renderer_changed)
+        row0.addSpacing(12)
+        row0.addWidget(QLabel("Default grouping"))
+        self.grouping_combo = QComboBox()
+        self.grouping_combo.addItems(list(GROUPING_OPTIONS.keys()))
+        self.grouping_combo.setCurrentText(self.grouping_to_label(self.manager.get_selected_grouping()))
+        self.grouping_combo.currentTextChanged.connect(self.on_grouping_changed)
+        row0.addWidget(self.grouping_combo)
 
-        ttk.Label(row0, text="Default grouping").pack(side="left")
-        self.grouping_combo = ttk.Combobox(
-            row0,
-            textvariable=self.grouping_ui_var,
-            values=list(GROUPING_OPTIONS.keys()),
-            state="readonly",
-            width=20,
-        )
-        self.grouping_combo.pack(side="left", padx=(10, 14))
-        self.grouping_combo.bind("<<ComboboxSelected>>", self.on_grouping_changed)
+        row0.addSpacing(10)
+        self.renderer_label = QLabel()
+        self.grouping_label = QLabel()
+        row0.addWidget(self.renderer_label)
+        row0.addWidget(self.grouping_label)
+        row0.addStretch(1)
 
-        ttk.Label(row0, textvariable=self.renderer_label_var).pack(side="left", padx=(8, 18))
-        ttk.Label(row0, textvariable=self.grouping_label_var).pack(side="left")
+        top_layout.addLayout(row0)
+        self.paths_label = QLabel()
+        self.paths_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        top_layout.addWidget(self.paths_label)
+        root.addWidget(top_box)
 
-        self.paths_label = ttk.Label(top, text="", justify="left")
-        self.paths_label.pack(anchor="w", pady=(8, 0))
+        mid_layout = QHBoxLayout()
 
-        mid = ttk.Frame(root)
-        mid.pack(fill="both", expand=True, pady=(10, 10))
+        left_box = QGroupBox("Known combos for selected renderer + grouping")
+        left_layout = QVBoxLayout(left_box)
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels([
+            "Combo key", "Track", "Layout", "Car", "SeriesID", "Enabled", "Autosave", "Last saved"
+        ])
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.itemSelectionChanged.connect(self.on_table_select)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        left_layout.addWidget(self.table)
+        mid_layout.addWidget(left_box, 3)
 
-        left = ttk.LabelFrame(mid, text="Known combos for selected renderer + grouping", padding=8)
-        left.pack(side="left", fill="both", expand=True)
+        right_box = QGroupBox("Selected combo / manual editor")
+        right_layout = QVBoxLayout(right_box)
 
-        columns = ("track", "layout", "car", "series", "enabled", "autosave", "saved")
-        self.tree = ttk.Treeview(left, columns=columns, show="tree headings", selectmode="browse")
-        self.tree.heading("#0", text="Combo key")
-        self.tree.heading("track", text="Track")
-        self.tree.heading("layout", text="Layout")
-        self.tree.heading("car", text="Car")
-        self.tree.heading("series", text="SeriesID")
-        self.tree.heading("enabled", text="Enabled")
-        self.tree.heading("autosave", text="Autosave")
-        self.tree.heading("saved", text="Last saved")
+        form_widget = QWidget()
+        form_layout = QFormLayout(form_widget)
+        self.track_internal_edit = self._make_edit(form_layout, "Track internal")
+        self.track_config_edit = self._make_edit(form_layout, "Track config/layout")
+        self.track_display_edit = self._make_edit(form_layout, "Track display")
+        self.track_display_short_edit = self._make_edit(form_layout, "Track display short")
+        self.car_path_edit = self._make_edit(form_layout, "Car path")
+        self.car_screen_edit = self._make_edit(form_layout, "Car screen")
+        self.car_short_edit = self._make_edit(form_layout, "Car short")
+        self.series_id_edit = self._make_edit(form_layout, "SeriesID")
+        right_layout.addWidget(form_widget)
 
-        self.tree.column("#0", width=300, anchor="w")
-        self.tree.column("track", width=180, anchor="w")
-        self.tree.column("layout", width=110, anchor="w")
-        self.tree.column("car", width=190, anchor="w")
-        self.tree.column("series", width=85, anchor="w")
-        self.tree.column("enabled", width=70, anchor="center")
-        self.tree.column("autosave", width=75, anchor="center")
-        self.tree.column("saved", width=145, anchor="w")
+        opt_row = QHBoxLayout()
+        self.enabled_check = QCheckBox("Enabled")
+        self.enabled_check.setChecked(True)
+        self.autosave_check = QCheckBox("Autosave on manual close")
+        self.autosave_check.setChecked(True)
+        opt_row.addWidget(self.enabled_check)
+        opt_row.addWidget(self.autosave_check)
+        opt_row.addStretch(1)
+        right_layout.addLayout(opt_row)
 
-        vsb = ttk.Scrollbar(left, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="right", fill="y")
-        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        btn_grid = QGridLayout()
+        buttons = [
+            ("Clear fields", self.clear_fields),
+            ("Refresh list", self.refresh_all),
+            ("Load current sim combo", self.load_current_sim_combo),
+            ("Save/overwrite profile from selected renderer INI", self.save_profile_from_active_ini),
+            ("Apply selected profile to selected renderer INI", self.apply_selected_profile),
+            ("Save enabled/autosave flags", self.save_entry_options),
+            ("Create/refresh global backup", self.create_global_backup),
+            ("Restore global backup to selected renderer INI", self.restore_global_backup),
+            ("Open current profiles folder", self.open_profiles_folder),
+        ]
+        for idx, (label, cb) in enumerate(buttons):
+            r, c = divmod(idx, 3)
+            b = QPushButton(label)
+            b.clicked.connect(cb)
+            btn_grid.addWidget(b, r, c)
+        right_layout.addLayout(btn_grid)
 
-        right = ttk.LabelFrame(mid, text="Selected combo / manual editor", padding=8)
-        right.pack(side="left", fill="both", expand=False, padx=(10, 0))
+        mid_layout.addWidget(right_box, 2)
+        root.addLayout(mid_layout, 1)
 
-        form = ttk.Frame(right)
-        form.pack(fill="x")
+        status_frame = QFrame()
+        status_layout = QHBoxLayout(status_frame)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        self.status_label = QLabel("Ready")
+        status_layout.addWidget(self.status_label)
+        status_layout.addStretch(1)
+        root.addWidget(status_frame)
 
-        self.track_internal_combo = self._add_labeled_combobox(form, 0, "Track internal", self.track_internal_var)
-        self.track_config_combo = self._add_labeled_combobox(form, 1, "Track config/layout", self.track_config_var)
-        self.track_display_combo = self._add_labeled_combobox(form, 2, "Track display", self.track_display_var)
-        self.track_display_short_combo = self._add_labeled_combobox(form, 3, "Track display short", self.track_display_short_var)
-        self.car_path_combo = self._add_labeled_combobox(form, 4, "Car path", self.car_path_var)
-        self.car_screen_combo = self._add_labeled_combobox(form, 5, "Car screen", self.car_screen_var)
-        self.car_short_combo = self._add_labeled_combobox(form, 6, "Car short", self.car_short_var)
-        self.series_combo = self._add_labeled_combobox(form, 7, "SeriesID", self.series_id_var)
+        log_box = QGroupBox("Log")
+        log_layout = QVBoxLayout(log_box)
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        log_layout.addWidget(self.log_text)
+        root.addWidget(log_box, 1)
 
-        opts = ttk.Frame(right)
-        opts.pack(fill="x", pady=(10, 8))
-        ttk.Checkbutton(opts, text="Enabled", variable=self.enabled_var).pack(side="left")
-        ttk.Checkbutton(opts, text="Autosave on manual close", variable=self.autosave_var).pack(side="left", padx=(12, 0))
-
-        btns = ttk.Frame(right)
-        btns.pack(fill="x", pady=(4, 0))
-
-        ttk.Button(btns, text="Clear fields", command=self.clear_fields).grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=3)
-        ttk.Button(btns, text="Refresh list", command=self.refresh_all).grid(row=0, column=1, sticky="ew", padx=(0, 6), pady=3)
-        ttk.Button(btns, text="Load current sim combo", command=self.load_current_sim_combo).grid(row=0, column=2, sticky="ew", pady=3)
-
-        ttk.Button(btns, text="Save/overwrite profile from selected renderer INI", command=self.save_profile_from_active_ini).grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=3)
-        ttk.Button(btns, text="Apply selected profile to selected renderer INI", command=self.apply_selected_profile).grid(row=1, column=1, sticky="ew", padx=(0, 6), pady=3)
-        ttk.Button(btns, text="Save enabled/autosave flags", command=self.save_entry_options).grid(row=1, column=2, sticky="ew", pady=3)
-
-        ttk.Button(btns, text="Create/refresh global backup", command=self.create_global_backup).grid(row=2, column=0, sticky="ew", padx=(0, 6), pady=3)
-        ttk.Button(btns, text="Restore global backup to selected renderer INI", command=self.restore_global_backup).grid(row=2, column=1, sticky="ew", padx=(0, 6), pady=3)
-        ttk.Button(btns, text="Open current profiles folder", command=self.open_profiles_folder).grid(row=2, column=2, sticky="ew", pady=3)
-
-        for col in range(3):
-            btns.columnconfigure(col, weight=1)
-
-        status_row = ttk.Frame(root)
-        status_row.pack(fill="x", pady=(0, 6))
-        ttk.Label(status_row, textvariable=self.status_var).pack(anchor="w")
-
-        log_box = ttk.LabelFrame(root, text="Log", padding=8)
-        log_box.pack(fill="both", expand=True)
-        self.log_text = ScrolledText(log_box, height=14, wrap="word")
-        self.log_text.pack(fill="both", expand=True)
-        self.log_text.configure(state="disabled")
-
-    def _add_labeled_combobox(self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar) -> ttk.Combobox:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3, padx=(0, 8))
-        combo = ttk.Combobox(parent, textvariable=var, width=42)
-        combo.grid(row=row, column=1, sticky="ew", pady=3)
-        parent.columnconfigure(1, weight=1)
+    def _make_edit(self, layout: QFormLayout, label: str) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.setMinimumWidth(340)
+        layout.addRow(label, combo)
         return combo
 
     def update_labels(self) -> None:
@@ -1153,35 +1134,42 @@ class App(tk.Tk):
         profiles_dir = self.manager.get_grouping_dir(renderer_file, grouping_mode)
         backup = self.manager.get_global_backup_path(renderer_file)
 
-        self.renderer_label_var.set(f"Selected file: {renderer_file}")
-        self.grouping_label_var.set(f"Selected grouping: {grouping_mode}")
-        self.paths_label.config(
-            text=(
-                f"Active INI: {active_ini}\n"
-                f"Profiles dir: {profiles_dir}\n"
-                f"Manifest: {MANIFEST_PATH}\n"
-                f"Global backup: {backup}"
-            )
+        self.renderer_label.setText(f"Selected file: {renderer_file}")
+        self.grouping_label.setText(f"Selected grouping: {grouping_mode}")
+        self.paths_label.setText(
+            f"Active INI: {active_ini}\n"
+            f"Profiles dir: {profiles_dir}\n"
+            f"Manifest: {MANIFEST_PATH}\n"
+            f"Global backup: {backup}"
         )
 
     def set_status(self, text: str) -> None:
-        self.status_var.set(text)
+        self.status_label.setText(text)
         self.enqueue_log(f"[{now_str()}] {text}")
+
+    def _set_combo_values(self, box: QComboBox, values: list[str]) -> None:
+        current = box.currentText()
+        box.blockSignals(True)
+        box.clear()
+        box.addItems(values)
+        box.setEditText(current)
+        box.blockSignals(False)
 
     def refresh_suggestions(self) -> None:
         suggestions = self.manager.get_suggestions(self.current_renderer_file(), self.current_grouping_mode())
-        self.track_internal_combo["values"] = suggestions["track_internal"]
-        self.track_config_combo["values"] = suggestions["track_config"]
-        self.track_display_combo["values"] = suggestions["track_display"]
-        self.car_path_combo["values"] = suggestions["car_path"]
-        self.car_screen_combo["values"] = suggestions["car_screen"]
-        self.series_combo["values"] = suggestions["series_id"]
+        self._set_combo_values(self.track_internal_edit, suggestions["track_internal"])
+        self._set_combo_values(self.track_config_edit, suggestions["track_config"])
+        self._set_combo_values(self.track_display_edit, suggestions["track_display"])
+        self._set_combo_values(self.car_path_edit, suggestions["car_path"])
+        self._set_combo_values(self.car_screen_edit, suggestions["car_screen"])
+        self._set_combo_values(self.series_id_edit, suggestions["series_id"])
 
-    def refresh_tree(self) -> None:
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+    def refresh_table(self) -> None:
+        entries = self.manager.list_entries(self.current_renderer_file(), self.current_grouping_mode())
+        self.table.setRowCount(0)
 
-        for entry in self.manager.list_entries(self.current_renderer_file(), self.current_grouping_mode()):
+        for row, entry in enumerate(entries):
+            self.table.insertRow(row)
             combo_key = str(entry.get("combo_key"))
             track = str(entry.get("track_display") or entry.get("track_internal") or "")
             layout = str(entry.get("track_config") or "")
@@ -1190,13 +1178,11 @@ class App(tk.Tk):
             enabled = "yes" if bool(entry.get("enabled", True)) else "no"
             autosave = "yes" if bool(entry.get("autosave_on_manual_close", True)) else "no"
             saved = str(entry.get("last_saved_at") or "")
-            self.tree.insert(
-                "",
-                "end",
-                iid=combo_key,
-                text=combo_key,
-                values=(track, layout, car, series_id, enabled, autosave, saved),
-            )
+
+            for col, value in enumerate([combo_key, track, layout, car, series_id, enabled, autosave, saved]):
+                self.table.setItem(row, col, QTableWidgetItem(value))
+
+        self.table.resizeColumnsToContents()
 
     def refresh_all(self) -> None:
         self.manager.settings = self.manager.load_settings()
@@ -1204,60 +1190,70 @@ class App(tk.Tk):
         self.manager.ensure_renderer_section(self.current_renderer_file())
         self.manager.ensure_grouping_section(self.current_renderer_file(), self.current_grouping_mode())
         self.update_labels()
-        self.refresh_tree()
+        self.refresh_table()
         self.refresh_suggestions()
         self.set_status("List, paths, and suggestions refreshed")
 
     def combo_from_form(self) -> ComboInfo:
         return ComboInfo(
-            track_internal=self.track_internal_var.get(),
-            track_config=self.track_config_var.get(),
-            track_display=self.track_display_var.get(),
-            track_display_short=self.track_display_short_var.get(),
-            car_path=self.car_path_var.get(),
-            car_screen=self.car_screen_var.get(),
-            car_short=self.car_short_var.get(),
-            series_id=self.series_id_var.get(),
+            track_internal=self.track_internal_edit.currentText(),
+            track_config=self.track_config_edit.currentText(),
+            track_display=self.track_display_edit.currentText(),
+            track_display_short=self.track_display_short_edit.currentText(),
+            car_path=self.car_path_edit.currentText(),
+            car_screen=self.car_screen_edit.currentText(),
+            car_short=self.car_short_edit.currentText(),
+            series_id=self.series_id_edit.currentText(),
         ).normalized()
 
+    def _set_combo_text(self, box: QComboBox, text: str) -> None:
+        idx = box.findText(text)
+        if idx >= 0:
+            box.setCurrentIndex(idx)
+        else:
+            box.setEditText(text)
+
     def fill_form(self, combo: ComboInfo, enabled: bool | None = None, autosave: bool | None = None) -> None:
-        self.track_internal_var.set(combo.track_internal)
-        self.track_config_var.set(combo.track_config)
-        self.track_display_var.set(combo.track_display)
-        self.track_display_short_var.set(combo.track_display_short)
-        self.car_path_var.set(combo.car_path)
-        self.car_screen_var.set(combo.car_screen)
-        self.car_short_var.set(combo.car_short)
-        self.series_id_var.set(combo.series_id)
+        self._set_combo_text(self.track_internal_edit, combo.track_internal)
+        self._set_combo_text(self.track_config_edit, combo.track_config)
+        self._set_combo_text(self.track_display_edit, combo.track_display)
+        self._set_combo_text(self.track_display_short_edit, combo.track_display_short)
+        self._set_combo_text(self.car_path_edit, combo.car_path)
+        self._set_combo_text(self.car_screen_edit, combo.car_screen)
+        self._set_combo_text(self.car_short_edit, combo.car_short)
+        self._set_combo_text(self.series_id_edit, combo.series_id)
         if enabled is not None:
-            self.enabled_var.set(enabled)
+            self.enabled_check.setChecked(enabled)
         if autosave is not None:
-            self.autosave_var.set(autosave)
+            self.autosave_check.setChecked(autosave)
 
     def clear_fields(self) -> None:
         self.selected_combo_key = None
         self.fill_form(ComboInfo(), enabled=True, autosave=True)
         self.set_status("Fields cleared")
 
-    def on_renderer_changed(self, _event: object) -> None:
+    def on_renderer_changed(self) -> None:
         renderer_file = self.current_renderer_file()
         self.manager.set_selected_renderer(renderer_file)
         self.selected_combo_key = None
         self.refresh_all()
         self.set_status(f"Default renderer changed to {renderer_file}")
 
-    def on_grouping_changed(self, _event: object) -> None:
+    def on_grouping_changed(self) -> None:
         grouping_mode = self.current_grouping_mode()
         self.manager.set_selected_grouping(grouping_mode)
         self.selected_combo_key = None
         self.refresh_all()
         self.set_status(f"Default grouping changed to {grouping_mode}")
 
-    def on_tree_select(self, _event: object) -> None:
-        selected = self.tree.selection()
-        if not selected:
+    def on_table_select(self) -> None:
+        row = self.table.currentRow()
+        if row < 0:
             return
-        combo_key = selected[0]
+        key_item = self.table.item(row, 0)
+        if key_item is None:
+            return
+        combo_key = key_item.text()
         entry = self.manager.get_entry(combo_key, self.current_renderer_file(), self.current_grouping_mode())
         if not entry:
             return
@@ -1275,15 +1271,15 @@ class App(tk.Tk):
         runtime = IRacingRuntime()
         try:
             if not runtime.is_sim_running():
-                messagebox.showinfo("Info", "The sim is not running right now.")
+                QMessageBox.information(self, "Info", "The sim is not running right now.")
                 return
             runtime.ensure_started()
             if not runtime.is_connected():
-                messagebox.showinfo("Info", "The SDK is not connected to the sim yet.")
+                QMessageBox.information(self, "Info", "The SDK is not connected to the sim yet.")
                 return
             combo = runtime.detect_combo()
             if combo is None:
-                messagebox.showinfo("Info", "Could not detect a complete combo right now.")
+                QMessageBox.information(self, "Info", "Could not detect a complete combo right now.")
                 return
             entry = self.manager.register_combo(combo, self.current_renderer_file(), self.current_grouping_mode())
             self.fill_form(
@@ -1300,29 +1296,36 @@ class App(tk.Tk):
     def save_profile_from_active_ini(self) -> None:
         combo = self.combo_from_form()
         if not combo.is_complete():
-            messagebox.showerror("Error", "Fill in at least the fields relevant to the selected grouping.")
+            QMessageBox.critical(self, "Error", "Fill in at least the fields relevant to the selected grouping.")
             return
 
         try:
             entry = self.manager.save_active_ini_as_profile(combo, self.current_renderer_file(), self.current_grouping_mode())
             combo_key = combo.combo_key(self.current_grouping_mode())
-            self.manager.update_entry_options(combo_key, self.enabled_var.get(), self.autosave_var.get(), self.current_renderer_file(), self.current_grouping_mode())
+            self.manager.update_entry_options(
+                combo_key,
+                self.enabled_check.isChecked(),
+                self.autosave_check.isChecked(),
+                self.current_renderer_file(),
+                self.current_grouping_mode(),
+            )
             self.selected_combo_key = combo_key
             self.refresh_all()
             self.set_status(f"Profile saved: {Path(str(entry['profile_ini'])).name}")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
     def apply_selected_profile(self) -> None:
         combo = self.combo_from_form()
         if not combo.is_complete():
-            messagebox.showerror("Error", "Select or fill in a valid combo.")
+            QMessageBox.critical(self, "Error", "Select or fill in a valid combo.")
             return
 
         runtime = IRacingRuntime()
         try:
             if runtime.is_sim_running():
-                messagebox.showwarning(
+                QMessageBox.warning(
+                    self,
                     "Sim open",
                     "Close the sim before manually applying a profile to the active INI.\n"
                     "The automatic monitor already handles this when it detects a mismatch.",
@@ -1332,23 +1335,27 @@ class App(tk.Tk):
             runtime.reset()
 
         try:
-            self.manager.apply_profile_to_active_ini(combo.combo_key(self.current_grouping_mode()), self.current_renderer_file(), self.current_grouping_mode())
+            self.manager.apply_profile_to_active_ini(
+                combo.combo_key(self.current_grouping_mode()),
+                self.current_renderer_file(),
+                self.current_grouping_mode(),
+            )
             self.set_status(f"Profile manually applied to the active INI ({self.current_renderer_file()})")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
     def save_entry_options(self) -> None:
         combo = self.combo_from_form()
         if not combo.is_complete():
-            messagebox.showerror("Error", "Select or fill in a valid combo first.")
+            QMessageBox.critical(self, "Error", "Select or fill in a valid combo first.")
             return
 
         try:
             self.manager.register_combo(combo, self.current_renderer_file(), self.current_grouping_mode())
             self.manager.update_entry_options(
                 combo.combo_key(self.current_grouping_mode()),
-                self.enabled_var.get(),
-                self.autosave_var.get(),
+                self.enabled_check.isChecked(),
+                self.autosave_check.isChecked(),
                 self.current_renderer_file(),
                 self.current_grouping_mode(),
             )
@@ -1356,13 +1363,13 @@ class App(tk.Tk):
             self.refresh_all()
             self.set_status("Enabled/autosave flags saved")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
     def create_global_backup(self) -> None:
         runtime = IRacingRuntime()
         try:
             if runtime.is_sim_running():
-                messagebox.showwarning("Sim open", "Close the sim before updating the global backup.")
+                QMessageBox.warning(self, "Sim open", "Close the sim before updating the global backup.")
                 return
         finally:
             runtime.reset()
@@ -1371,13 +1378,13 @@ class App(tk.Tk):
             self.manager.create_or_refresh_global_backup(self.current_renderer_file())
             self.set_status(f"Global backup created/updated for {self.current_renderer_file()}")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
     def restore_global_backup(self) -> None:
         runtime = IRacingRuntime()
         try:
             if runtime.is_sim_running():
-                messagebox.showwarning("Sim open", "Close the sim before restoring the global backup.")
+                QMessageBox.warning(self, "Sim open", "Close the sim before restoring the global backup.")
                 return
         finally:
             runtime.reset()
@@ -1386,29 +1393,29 @@ class App(tk.Tk):
             self.manager.restore_global_backup(self.current_renderer_file())
             self.set_status(f"Global backup restored to the active INI ({self.current_renderer_file()})")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
     def open_profiles_folder(self) -> None:
         try:
             path = self.manager.get_grouping_dir(self.current_renderer_file(), self.current_grouping_mode())
             path.mkdir(parents=True, exist_ok=True)
-            import os
             os.startfile(path)  # type: ignore[attr-defined]
             self.set_status("Profiles folder opened")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            QMessageBox.critical(self, "Error", str(e))
 
-    def on_close(self) -> None:
+    def closeEvent(self, event) -> None:  # type: ignore[override]
         try:
             self.monitor.stop()
         finally:
-            self.destroy()
+            event.accept()
 
 
 def main() -> int:
-    app = App()
-    app.mainloop()
-    return 0
+    app = QApplication([])
+    window = App()
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
