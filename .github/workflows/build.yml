@@ -27,6 +27,7 @@ jobs:
 
       - name: Validate Python syntax
         run: |
+          python -m py_compile apps/Nishizumi_CautionOverlay.py
           python -m py_compile apps/Nishizumi_FuelMonitor.py
           python -m py_compile apps/Nishizumi_Pittime.py
           python -m py_compile apps/Nishizumi_TireWear.py

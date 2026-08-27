@@ -12,6 +12,7 @@ Nishizumi Tools is a collection of standalone iRacing helper overlays written in
 - **Nishizumi Pit Calibrator**: one-stop pit timing calibration (total, service, base, fuel, and manual tire marker).
 - **Nishizumi TireWear**: learned tire degradation model per car/track/conditions.
 - **Nishizumi Traction**: grip-usage coaching overlay based on your telemetry.
+- **Nishizumi Caution Overlay**: how many full course cautions have been thrown and how many laps have been run under them, in a small always-on-top window you can drag and resize.
 - **Launcher update checker (v7):** the single-EXE launcher now checks GitHub Releases and shows when a newer version is available.
 
 ---
@@ -34,6 +35,7 @@ Notes:
 
 - `tkinter` is used by FuelMonitor, Pit Calibrator, and Traction (usually included with Python).
 - `numpy` + `pyqt5` are required for TireWear.
+- `pyside6` is required for Caution Overlay (`pip install pyside6`) - it is the only app that uses Qt 6 rather than pyqt5.
 - On Linux/macOS, apps use `~/.config/NishizumiTools` as fallback.
 
 ### Recommended launch order
