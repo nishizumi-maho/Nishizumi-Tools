@@ -1,0 +1,90 @@
+name: Build Caution Overlay
+
+# Publishes the Caution Overlay .exe as a pre-release, so it can be downloaded
+# without building it. Pre-release on purpose: the launcher's update check
+# reads releases/latest, which skips pre-releases, so this never shows up as a
+# launcher update.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/Nishizumi_CautionOverlay.py"
+      - "apps/Nishizumi_CautionOverlay.spec"
+      - ".github/workflows/build-caution-overlay.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag for the .exe"
+        required: false
+        default: "caution-overlay-v1"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6-Essentials pyirsdk pyinstaller==6.11.1
+
+      - name: Build executable
+        run: pyinstaller --noconfirm --clean apps/Nishizumi_CautionOverlay.spec
+
+      - name: Self test the packaged executable
+        run: |
+          $exe = "dist\Nishizumi_CautionOverlay.exe"
+          $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "packaged size: $size MB"
+          $proc = Start-Process -FilePath $exe -ArgumentList "--selftest", "6" -Wait -PassThru
+          if ($proc.ExitCode -eq 0) {
+            Write-Host "self test passed on the windows platform plugin"
+            exit 0
+          }
+          Write-Host "windows platform plugin exited with $($proc.ExitCode), retrying offscreen"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $proc = Start-Process -FilePath $exe -ArgumentList "--selftest", "6" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "self test failed (exit code $($proc.ExitCode))" }
+          Write-Host "self test passed with the offscreen platform plugin"
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $tag = "${{ inputs.tag }}"
+          if (-not $tag) { $tag = "caution-overlay-v1" }
+          $notes = @'
+          Standalone build of **Nishizumi Caution Overlay** - a shortcut so the overlay can be grabbed without building it.
+
+          * Shows the number of **full course cautions** in the race and the number of **caution laps** run under them.
+          * Hover the window for the close button, the *Lock position* checkbox and the resize marks.
+          * Drag it anywhere with the left mouse button; drag the bottom right corner to resize, and the numbers scale with it. Position, size and lock state are remembered.
+          * No install needed: download the exe and run it, with iRacing in **windowed or borderless** mode - exclusive fullscreen hides any overlay.
+
+          Marked as a pre-release on purpose: the launcher's update check reads `releases/latest`, which skips pre-releases, so this does not show up as a launcher update.
+
+          Source: `apps/Nishizumi_CautionOverlay.py`
+          '@
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag dist/Nishizumi_CautionOverlay.exe `
+            --prerelease `
+            --target ${{ github.sha }} `
+            --title "Nishizumi Caution Overlay $tag" `
+            --notes $notes
