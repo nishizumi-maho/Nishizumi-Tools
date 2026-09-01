@@ -1,0 +1,105 @@
+name: Release Nishizumi Tools
+
+# Builds the single-EXE launcher on Windows and publishes it as a GitHub
+# release. Push a tag (v9, v10, ...) or start it by hand from the Actions tab.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (created if it does not exist)"
+        required: true
+        default: "v9"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish the launcher
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build the single EXE
+        working-directory: nishizumi_tools_single_exe_package
+        run: .\build_all.bat
+
+      - name: Self test the packaged executable
+        working-directory: nishizumi_tools_single_exe_package
+        run: |
+          $exe = "dist\NishizumiTools.exe"
+          if (-not (Test-Path $exe)) { throw "the build did not produce $exe" }
+          $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "packaged size: $size MB"
+          # --selftest imports every app the launcher lists, so a hidden import
+          # missing from the bundle fails here and not on the user's machine.
+          $proc = Start-Process -FilePath $exe -ArgumentList "--selftest" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "self test failed (exit code $($proc.ExitCode))" }
+          Write-Host "self test passed: every app is bundled"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: nishizumi_tools_single_exe_package
+        run: |
+          # gh writes to stderr and returns non zero when a release is missing,
+          # which is exactly how the check below decides; without this the step
+          # would fail on that first probe.
+          $ErrorActionPreference = 'Continue'
+          $tag = "${{ inputs.tag }}"
+          if (-not $tag) { $tag = "${{ github.ref_name }}" }
+          Write-Host "publishing $tag"
+          $notes = @'
+          **Nishizumi Tools** launcher, one file: download `NishizumiTools.exe` and run it. No install, no Python needed.
+
+          ## What is new in this release
+
+          * **Caution Overlay is now part of the app.** It opens from the launcher like FuelMonitor, Pit Calibrator, TireWear and Traction, instead of being a separate download.
+          * The overlay shows the **full course cautions** of the race and the **caution laps** run under them. Local (single corner) yellows are ignored on purpose, so a road course does not inflate the count.
+          * Hover the overlay for the close button, the *Lock position* checkbox and the resize marks. Drag it anywhere with the left mouse button, drag the bottom right corner to resize, and right click for *Reset counters* / *Reset size*. Position, size and lock state are remembered.
+          * Overlay settings now live in the shared data folder (`%APPDATA%\NishizumiTools`) with the rest of the suite.
+
+          ## Included apps
+
+          | App | What it does |
+          | --- | --- |
+          | FuelMonitor | Fuel usage, stint projection and target delta |
+          | Pit Calibrator | Total, service, base, fuel and manual tire timing of a stop |
+          | TireWear | Learned tire degradation model per car and track |
+          | Traction | Grip-usage coaching overlay |
+          | Caution Overlay | Full course cautions and caution laps |
+
+          ## Notes
+
+          * Run iRacing in **windowed or borderless** mode: exclusive fullscreen hides any overlay.
+          * Launch the app after you click **Drive**, so telemetry is live.
+          * App data is stored in `%APPDATA%\NishizumiTools`.
+          * The launcher checks this page for updates every 6 hours.
+          '@
+          gh release view $tag > $null 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "$tag already exists, replacing the asset and the notes"
+            gh release upload $tag dist/NishizumiTools.exe --clobber
+            if ($LASTEXITCODE -ne 0) { Write-Host "upload failed"; exit 1 }
+            gh release edit $tag --title "Nishizumi Tools $tag" --notes $notes --draft=false --prerelease=false
+            if ($LASTEXITCODE -ne 0) { Write-Host "edit failed"; exit 1 }
+          } else {
+            gh release create $tag dist/NishizumiTools.exe `
+              --target ${{ github.sha }} `
+              --title "Nishizumi Tools $tag" `
+              --notes $notes
+            if ($LASTEXITCODE -ne 0) { Write-Host "create failed"; exit 1 }
+          }
+          Write-Host "published: https://github.com/${{ github.repository }}/releases/tag/$tag"

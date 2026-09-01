@@ -14,7 +14,7 @@ from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
 
 APP_TITLE = "Nishizumi Tools"
 APP_SUBTITLE = "Default launcher for the overlay collection"
-APP_VERSION = "v8"
+APP_VERSION = "v9"
 APP_DIR_NAME = "NishizumiTools"
 MENU_STATE_FILE = "menu_state.json"
 APP_ICON_FILE_PNG = "nishizumi_tools_icon.png"
@@ -37,6 +37,7 @@ class AppDefinition:
     key: str
     title: str
     subtitle: str
+    module: str
 
 
 APPS = [
@@ -44,21 +45,31 @@ APPS = [
         key="fuel",
         title="FuelMonitor",
         subtitle="Fuel usage, stint projection, target delta, and race-smart hints.",
+        module="Nishizumi_FuelMonitor",
     ),
     AppDefinition(
         key="pit",
         title="Pit Calibrator",
         subtitle="Live total, service, base, fuel, and manual tire timing during the stop.",
+        module="nishizumi_pitcalibrator",
     ),
     AppDefinition(
         key="tire",
         title="TireWear",
         subtitle="Learned tire degradation model with saved data per car and track.",
+        module="Nishizumi_TireWear",
     ),
     AppDefinition(
         key="traction",
         title="Traction",
         subtitle="Grip-usage coaching overlay with live circle and optional IBT reference.",
+        module="Nishizumi_Traction",
+    ),
+    AppDefinition(
+        key="caution",
+        title="Caution Overlay",
+        subtitle="Full course cautions and the laps run under them, in a resizable always-on-top window.",
+        module="Nishizumi_CautionOverlay",
     ),
 ]
 APP_MAP = {app.key: app for app in APPS}
@@ -758,6 +769,13 @@ def run_selected_app(app_key: str) -> int:
 
         return int(tirewear_main() or 0)
 
+    if app_key == "caution":
+        # The overlay builds its own QApplication; run_overlay skips the
+        # command line parser because the launcher passes "--app caution".
+        from Nishizumi_CautionOverlay import run_overlay
+
+        return int(run_overlay() or 0)
+
     raise SystemExit(f"Unknown app key: {app_key}")
 
 
@@ -785,15 +803,46 @@ def tk_icon_image(path: str):
         return None
 
 
+def run_selftest() -> int:
+    """Import every bundled app and report whether they are all there.
+
+    The packaged build runs this against the frozen EXE: PyInstaller only keeps
+    the app modules because they are listed as hidden imports, so a missing one
+    fails here instead of at the moment a user clicks Open. The EXE is windowed
+    and has no console, so the exit code is the result: 0 when every app
+    imports, 1 otherwise.
+    """
+    import importlib
+
+    failures = []
+    for definition in APPS:
+        try:
+            importlib.import_module(definition.module)
+        except Exception as exc:  # pragma: no cover - depends on the build
+            failures.append(f"{definition.title} ({definition.module}): {exc}")
+            print(f"FAIL {definition.title} -> {definition.module}: {exc}")
+        else:
+            print(f"ok   {definition.title} -> {definition.module}")
+
+    if failures:
+        print(f"{len(failures)} app(s) missing from this build")
+        return 1
+    print(f"all {len(APPS)} apps are present in this build")
+    return 0
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--app", choices=sorted(APP_MAP))
+    parser.add_argument("--selftest", action="store_true")
     return parser
 
 
 def main() -> int:
     parser = build_arg_parser()
     args, _unknown = parser.parse_known_args(sys.argv[1:])
+    if args.selftest:
+        return run_selftest()
     if args.app:
         return run_selected_app(args.app)
     return run_launcher()

@@ -1,7 +1,7 @@
 # Nishizumi Tools
 
 ➡️ **Latest Release:** [Get the newest release package](https://github.com/nishizumi-maho/Nishizumi-Tools/releases)
-🆕 **Current launcher version:** **v7**
+🆕 **Current launcher version:** **v9**
 
 <img width="512" height="512" alt="ChatGPT Image Mar 31, 2026, 06_17_31 AM" src="https://github.com/user-attachments/assets/65e9bf59-1160-4f6d-a197-7c783e845013" />
 
@@ -13,7 +13,8 @@ Nishizumi Tools is a collection of standalone iRacing helper overlays written in
 - **Nishizumi TireWear**: learned tire degradation model per car/track/conditions.
 - **Nishizumi Traction**: grip-usage coaching overlay based on your telemetry.
 - **Nishizumi Caution Overlay**: how many full course cautions have been thrown and how many laps have been run under them, in a small always-on-top window you can drag and resize.
-- **Launcher update checker (v7):** the single-EXE launcher now checks GitHub Releases and shows when a newer version is available.
+- **Caution Overlay in the launcher (v9):** the overlay is now bundled in the single-EXE launcher and opens from it like every other app, instead of being a separate download.
+- **Launcher update checker (v7):** the single-EXE launcher checks GitHub Releases and shows when a newer version is available.
 
 ---
 
@@ -28,14 +29,14 @@ Nishizumi Tools is a collection of standalone iRacing helper overlays written in
 Install dependencies:
 
 ```bash
-pip install irsdk numpy pyqt5
+pip install irsdk numpy pyqt5 pyside6
 ```
 
 Notes:
 
 - `tkinter` is used by FuelMonitor, Pit Calibrator, and Traction (usually included with Python).
 - `numpy` + `pyqt5` are required for TireWear.
-- `pyside6` is required for Caution Overlay (`pip install pyside6`) - it is the only app that uses Qt 6 rather than pyqt5.
+- `pyside6` is required for Caution Overlay and for the single-EXE launcher.
 - On Linux/macOS, apps use `~/.config/NishizumiTools` as fallback.
 
 ### Recommended launch order
@@ -59,6 +60,8 @@ Files currently used:
 - `fuel_consumption_monitor.json` — FuelMonitor window position.
 - `nishizumi_tirewear_model.json` — TireWear learned model.
 - `nishizumi_tirewear_settings.json` — TireWear HUD settings.
+- `menu_state.json` — launcher window size, position, and options.
+- `nishizumi_caution_overlay.ini` — Caution Overlay position, size, and lock state when it is opened from the launcher.
 
 ---
 
@@ -184,6 +187,35 @@ Traction shows live grip usage and coaching hints so you can identify where you 
 
 ---
 
+## 5) Nishizumi Caution Overlay
+
+**File:** `apps/Nishizumi_CautionOverlay.py`
+
+```bash
+python apps/Nishizumi_CautionOverlay.py
+python apps/Nishizumi_CautionOverlay.py --demo   # simulated race, to place the window
+```
+
+### What it does
+
+A small always-on-top panel with the two numbers broadcasts quote as "5 cautions for 27 laps":
+
+- **CAUTIONS**: full course cautions thrown in the race. Local (single corner) yellows are ignored on purpose, so a road course does not inflate the count.
+- **CAUTION LAPS**: laps the leader completed while those cautions were out.
+
+Counting only runs in a Race session that is actually racing, and the counters reset on their own when the session changes. The border turns yellow while a full course caution is out.
+
+### Usage
+
+- Open it from the **Nishizumi Tools launcher**, or run the file directly.
+- Hover the window for the close button, the **Lock position** checkbox, and the resize marks.
+- Drag it with the left mouse button; drag the bottom right corner to resize - the numbers scale with the window.
+- Right click for **Lock position**, **Reset counters**, **Reset size**, and **Close overlay**.
+- Position, size, and lock state are remembered between runs.
+- iRacing has to run in **windowed or borderless** mode: exclusive fullscreen hides any overlay.
+
+---
+
 ## Removed / archived app
 
 - **Nishizumi_Pittime** was removed from active apps and moved to `OLD/Nishizumi_Pittime.py`.
@@ -196,6 +228,7 @@ Traction shows live grip usage and coaching hints so you can identify where you 
 - Need to calibrate pit timings from real stops → **Pit Calibrator**
 - Need long-run tire degradation learning → **TireWear**
 - Need grip/coaching feedback → **Traction**
+- Need the caution count and caution laps of the race → **Caution Overlay**
 
 ---
 
@@ -208,5 +241,8 @@ Traction shows live grip usage and coaching hints so you can identify where you 
 - `apps/nishizumi_pitcalibrator.py`
 - `apps/Nishizumi_TireWear.py`
 - `apps/Nishizumi_Traction.py`
+- `apps/Nishizumi_CautionOverlay.py`
+- `apps/Nishizumi_CautionOverlay.spec`
+- `nishizumi_tools_single_exe_package/` — sources and build script for the single-EXE launcher
 - `OLD/Nishizumi_Pittime.py`
 - `docs/fuel-monitor.md`

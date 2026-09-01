@@ -1,3 +1,4 @@
 irsdk
 numpy
 pyqt5
+pyside6
