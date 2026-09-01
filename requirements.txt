@@ -1,4 +1,4 @@
-irsdk
+pyirsdk
 numpy
 pyqt5
 pyside6
