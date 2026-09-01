@@ -43,6 +43,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --hidden-import nishizumi_pitcalibrator ^
   --hidden-import Nishizumi_TireWear ^
   --hidden-import Nishizumi_Traction ^
+  --hidden-import Nishizumi_CautionOverlay ^
   menu.py
 
 if errorlevel 1 (

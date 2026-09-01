@@ -29,6 +29,14 @@ jobs:
         run: |
           python -m py_compile apps/Nishizumi_CautionOverlay.py
           python -m py_compile apps/Nishizumi_FuelMonitor.py
-          python -m py_compile apps/Nishizumi_Pittime.py
           python -m py_compile apps/Nishizumi_TireWear.py
           python -m py_compile apps/Nishizumi_Traction.py
+          python -m py_compile apps/nishizumi_pitcalibrator.py
+          python -m py_compile OLD/Nishizumi_Pittime.py
+          python -m py_compile nishizumi_tools_single_exe_package/menu.py
+          python -m py_compile nishizumi_tools_single_exe_package/Nishizumi_CautionOverlay.py
+
+      - name: Check the launcher copy of the Caution Overlay is up to date
+        run: |
+          diff apps/Nishizumi_CautionOverlay.py \
+               nishizumi_tools_single_exe_package/Nishizumi_CautionOverlay.py
