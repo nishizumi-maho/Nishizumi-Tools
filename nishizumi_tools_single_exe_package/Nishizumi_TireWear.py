@@ -10,7 +10,7 @@ Single-file application that:
 - Shows a transparent overlay HUD and a settings/info menu (PySide6)
 
 Install:
-    pip install irsdk numpy pyqt5
+    pip install pyirsdk numpy pyside6
 Run:
     python Nishizumi_TireWear.py
 """

@@ -29,7 +29,7 @@ Nishizumi Tools is a collection of standalone iRacing helper overlays written in
 Install dependencies:
 
 ```bash
-pip install irsdk numpy pyqt5 pyside6
+pip install pyirsdk numpy pyqt5 pyside6
 ```
 
 Notes:
